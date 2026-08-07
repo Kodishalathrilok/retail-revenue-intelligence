@@ -1,0 +1,39 @@
+# --- Secrets: keep this first and keep it accurate ---
+.env
+.env.*
+!.env.example
+*.pgpass
+
+# --- Raw data (large, redistributable only from source) ---
+data/raw/
+data/interim/
+data/processed/
+*.csv
+*.zip
+!tests/fixtures/**/*.csv
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Generated reports (produced by real runs, not committed) ---
+reports/
+docs/_generated/
+
+# --- Node / Next.js (Phase 7) ---
+node_modules/
+.next/
+out/
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

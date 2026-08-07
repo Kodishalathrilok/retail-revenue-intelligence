@@ -1,0 +1,50 @@
+[project]
+name = "rrip"
+version = "0.1.0"
+description = "Retail Revenue Intelligence Platform"
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    # Pinned below 3.0 deliberately: DoWhy/statsmodels (Phase 6c) trail pandas
+    # majors, and the same reasoning that put us on Python 3.12 applies here.
+    # Revisit once the causal stack declares pandas 3 support.
+    "pandas>=2.2,<3.0",
+    "numpy>=1.26,<3.0",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+rrip = "rrip.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# typer.Option/Argument in defaults is the framework's documented idiom, not the
+# mutable-default bug B008 exists to catch.
+"src/rrip/cli.py" = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
