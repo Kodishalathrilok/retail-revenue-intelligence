@@ -4,10 +4,10 @@
 !.env.example
 *.pgpass
 
-# --- Raw data (large, redistributable only from source) ---
-data/raw/
-data/interim/
-data/processed/
+# --- Raw data ---
+# Raw CSVs live outside the repo (see RRIP_DUNNHUMBY_RAW_DIR in .env.example).
+# These entries remain as a guard in case anyone unzips into the working tree.
+data/
 *.csv
 *.zip
 !tests/fixtures/**/*.csv

@@ -27,6 +27,28 @@ of the form "sales peak on Saturdays" would be unsupported, and the project does
 not make one. This caveat appears in `docs/schema.md` and travels with the
 dashboard UI wherever calendar dates are displayed.
 
+## Local setup
+
+Requires Python 3.12 and PostgreSQL 16. Repo lives at
+`C:\dev\retail-revenue-intelligence`.
+
+```bash
+py -3.12 -m venv .venv && ./.venv/Scripts/python.exe -m pip install -e ".[dev]"
+```
+
+Copy `.env.example` to `.env` and fill in credentials. `.env` is gitignored.
+
+### Where the data lives
+
+The raw dunnhumby CSVs sit **outside the repo**, at `C:\data\dunnhumby` by
+default. Two reasons: they are ~1.5 GB and do not belong in version control, and
+keeping them out of a cloud-synced folder avoids Files On-Demand dehydrating
+them — which surfaces as a loader that stalls on a file that appears to be
+present.
+
+Point `RRIP_DUNNHUMBY_RAW_DIR` wherever you unzipped them. File discovery is
+recursive and case-insensitive, so the mirror's folder layout does not matter.
+
 ## Running the dataset probe
 
 ```bash
@@ -34,14 +56,5 @@ rrip profile
 ```
 
 Measures row counts, data quality, and whether any campaign can support a
-difference-in-differences. Exits non-zero if none can.
-
-## Local setup
-
-Requires Python 3.12 and PostgreSQL 16.
-
-```bash
-py -3.12 -m venv .venv && ./.venv/Scripts/python.exe -m pip install -e ".[dev]"
-```
-
-Copy `.env.example` to `.env` and fill in credentials. `.env` is gitignored.
+difference-in-differences. Exits non-zero if none can, so it works as a CI gate
+rather than something you have to read carefully.

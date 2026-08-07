@@ -21,13 +21,20 @@ class Settings(BaseSettings):
     pg_password: str = Field(default="", alias="RRIP_PG_PASSWORD")
     pg_database: str = Field(default="rrip", alias="RRIP_PG_DATABASE")
 
+    # Repo-relative fallback only. Real runs point this outside the repo via
+    # .env (see .env.example) -- a machine-specific absolute path does not
+    # belong in source, and CI needs a portable default for fixtures.
     dunnhumby_raw_dir: Path = Field(
         default=Path("data/raw/dunnhumby"), alias="RRIP_DUNNHUMBY_RAW_DIR"
     )
 
     @property
     def raw_dir(self) -> Path:
-        """Absolute path to the dunnhumby CSVs."""
+        """Absolute path to the dunnhumby CSVs.
+
+        Relative values resolve against the repo root, so the setting behaves
+        the same whatever directory the CLI is invoked from.
+        """
         d = self.dunnhumby_raw_dir
         return d if d.is_absolute() else PROJECT_ROOT / d
 
