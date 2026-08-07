@@ -109,19 +109,23 @@ def analyse(
             overlap_households |= members_by_campaign.get(other, set())
 
         contaminated = treated & overlap_households
+        # The group Phase 6c would actually use: treated by this campaign and
+        # nothing else overlapping it. An estimate on the full treated set
+        # measures "this campaign plus whatever else those households were in".
+        clean_treated = treated - contaminated
         control = panel - treated - overlap_households
         strict_control = never_treated
 
         pre_tx_treated = int(
             tx[(tx["day"] >= window_start) & (tx["day"] < start)
-               & (tx["household_key"].isin(treated))].shape[0]
+               & (tx["household_key"].isin(clean_treated))].shape[0]
         )
         pre_tx_control = int(
             tx[(tx["day"] >= window_start) & (tx["day"] < start)
                & (tx["household_key"].isin(control))].shape[0]
         )
 
-        slope_t, weeks_t = _pre_period_trend(tx, treated, start, window_start)
+        slope_t, weeks_t = _pre_period_trend(tx, clean_treated, start, window_start)
         slope_c, weeks_c = _pre_period_trend(tx, control, start, window_start)
 
         # Reject reasons, accumulated so the report can explain itself.
@@ -130,8 +134,11 @@ def analyse(
             reasons.append(f"pre-period {pre_days}d < {MIN_PRE_DAYS}d")
         if post_days < MIN_POST_DAYS:
             reasons.append(f"post-period {post_days}d < {MIN_POST_DAYS}d")
-        if len(treated) < MIN_TREATED:
-            reasons.append(f"treated n={len(treated)} < {MIN_TREATED}")
+        if len(clean_treated) < MIN_TREATED:
+            reasons.append(
+                f"uncontaminated treated n={len(clean_treated)} < {MIN_TREATED}"
+                + (f" (of {len(treated)} enrolled)" if contaminated else "")
+            )
         if len(control) < MIN_CONTROL:
             blockers = [
                 str(o)
@@ -155,6 +162,7 @@ def analyse(
                 "pre_days": pre_days,
                 "post_days": post_days,
                 "treated_n": len(treated),
+                "clean_treated_n": len(clean_treated),
                 "control_n": len(control),
                 "strict_control_n": len(strict_control),
                 "overlapping_campaigns": ",".join(map(str, sorted(overlapping))) or "-",
@@ -178,6 +186,9 @@ def analyse(
         )
 
     out = pd.DataFrame(rows)
+    # Rank viable campaigns by how clean they are, then by usable sample size --
+    # contamination is the binding constraint here, not raw enrolment.
     return out.sort_values(
-        ["viable", "pre_days", "treated_n"], ascending=[False, False, False]
+        ["viable", "contaminated_pct", "clean_treated_n"],
+        ascending=[False, True, False],
     ).reset_index(drop=True)

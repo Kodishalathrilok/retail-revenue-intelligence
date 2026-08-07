@@ -18,8 +18,14 @@ Row counts will be stated plainly here once measured, not estimated. See
 ### A note on dates
 
 dunnhumby records time as `DAY` 1–711 relative to a shared panel start, with no
-published calendar anchor. This project anchors `DAY 1` to a Monday so that week
-boundaries fall Monday–Sunday as retail weeks do.
+published calendar anchor.
+
+The panel does **not** begin on a week boundary. `WEEK_NO` follows
+`(DAY + 8) // 7` exactly across all 2.6M transactions: week 1 is a partial
+five-day week (days 1–5), and day 6 opens the first full week. So this project
+anchors **day 6 to a Monday**, which makes day 1 a Wednesday and keeps derived
+calendar weeks aligned with dunnhumby's own `WEEK_NO` — the column
+`causal_data` is keyed on.
 
 **Elapsed intervals, month boundaries, and year-over-year comparisons are real.
 Calendar weekday labels are a modelling convention, not source data.** Any claim

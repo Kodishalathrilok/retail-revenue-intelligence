@@ -133,6 +133,57 @@ def test_small_treatment_group_rejected() -> None:
     assert "treated n" in row["reasons"]
 
 
+def test_size_screen_applies_to_uncontaminated_treated_only() -> None:
+    """A large enrolment that is almost entirely contaminated is not a usable group.
+
+    Campaign 1 enrols 200 households, but 150 of them are simultaneously in the
+    overlapping campaign 2, leaving 50 clean -- below the threshold. Screening on
+    raw enrolment would wrongly pass this.
+    """
+    tx = make_tx()
+    d = desc([(1, "TypeA", 400, 500), (2, "TypeC", 420, 480)])
+    m = members({1: range(1, 201), 2: range(51, 201)})
+
+    c1 = only(campaigns.analyse(tx, m, d), 1)
+
+    assert c1["treated_n"] == 200
+    assert c1["clean_treated_n"] == 50
+    assert not c1["viable"]
+    assert "uncontaminated treated n=50" in c1["reasons"]
+    assert "of 200 enrolled" in c1["reasons"]
+
+
+def test_partial_contamination_still_viable_when_clean_group_survives() -> None:
+    """Contamination is not disqualifying while enough clean households remain."""
+    tx = make_tx(n_households=800)
+    d = desc([(1, "TypeA", 400, 500), (2, "TypeC", 420, 480)])
+    m = members({1: range(1, 301), 2: range(201, 301)})
+
+    c1 = only(campaigns.analyse(tx, m, d), 1)
+
+    assert c1["treated_n"] == 300
+    assert c1["clean_treated_n"] == 200
+    assert c1["contaminated_pct"] == pytest.approx(33.3, abs=0.1)
+    assert bool(c1["viable"])
+
+
+def test_ranking_puts_cleanest_campaign_first() -> None:
+    """Viable campaigns rank by contamination, not raw enrolment."""
+    tx = make_tx(n_households=1200)
+    d = desc([
+        (1, "TypeA", 400, 500),   # big but heavily contaminated
+        (2, "TypeC", 420, 480),   # the contaminating overlap
+        (5, "TypeA", 100, 200),   # small but pristine
+    ])
+    m = members({1: range(1, 501), 2: range(151, 501), 5: range(600, 800)})
+
+    res = campaigns.analyse(tx, m, d)
+    viable = res[res["viable"]]
+
+    assert viable.iloc[0]["campaign"] == 5
+    assert viable.iloc[0]["contaminated_pct"] == 0.0
+
+
 # --- contamination and the control-group definition -------------------------
 
 def test_overlapping_campaigns_flagged_as_contamination() -> None:

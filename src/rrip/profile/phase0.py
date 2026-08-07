@@ -54,7 +54,11 @@ def scan_causal(path: Path) -> dict:
     display_vals: set = set()
     mailer_vals: set = set()
 
-    for chunk in pd.read_csv(path, chunksize=2_000_000):
+    # display/mailer are categorical codes mixing digits and letters ('0'..'9',
+    # 'A'..'Z'). Without an explicit dtype pandas infers int for some chunks and
+    # str for others, which both warns and corrupts the distinct-value set.
+    dtypes = {"display": "string", "mailer": "string"}
+    for chunk in pd.read_csv(path, chunksize=2_000_000, dtype=dtypes):
         chunk.columns = [c.strip().lower() for c in chunk.columns]
         rows += len(chunk)
         if "week_no" in chunk:
@@ -94,15 +98,24 @@ def quality_checks(tx: pd.DataFrame, products: pd.DataFrame | None,
     add("distinct stores", _fmt(tx["store_id"].nunique()), "dim_store size")
 
     day_min, day_max = int(tx["day"].min()), int(tx["day"].max())
-    add("day range", f"{day_min} - {day_max}", "dim_date span; anchor DAY 1 to a Monday")
+    add("day range", f"{day_min} - {day_max}", "dim_date span")
     add("week range", f"{int(tx['week_no'].min())} - {int(tx['week_no'].max())}",
         "partition range for fact_causal")
 
-    # Is WEEK_NO derivable from DAY? If so it is redundant in the model.
-    derived = ((tx["day"] - 1) // 7) + 1
-    mismatches = int((derived != tx["week_no"]).sum())
-    add("week_no != ceil(day/7)", _fmt(mismatches),
-        "0 means week_no is redundant and can be derived in dim_date")
+    # How does WEEK_NO relate to DAY? The panel does not start on a week
+    # boundary -- week 1 is a partial week -- so the naive ceil(day/7) is wrong.
+    # Getting this right determines the dim_date anchor.
+    naive = ((tx["day"] - 1) // 7) + 1
+    offset = (tx["day"] + 8) // 7
+    add("week_no != ceil(day/7) [naive]", _fmt(int((naive != tx["week_no"]).sum())),
+        "non-zero means the panel does not start on a week boundary")
+    add("week_no != (day+8)//7 [offset]", _fmt(int((offset != tx["week_no"]).sum())),
+        "0 confirms week 1 is partial and day 6 starts the first full week")
+
+    wk1 = tx.loc[tx["week_no"] == 1, "day"]
+    if not wk1.empty:
+        add("week 1 day span", f"{int(wk1.min())}-{int(wk1.max())}",
+            "a short week 1 fixes the weekday anchor: day 6 is a Monday, so day 1 is a Wednesday")
 
     # Grain integrity -- decides whether (basket_id, product_id) can be the PK.
     dupes = int(tx.duplicated(subset=["basket_id", "product_id"]).sum())
@@ -191,18 +204,22 @@ def build_report(
              f"control >= {campaign_analysis.MIN_CONTROL} households.\n")
     L.append(f"The analysis window is a bounded {campaign_analysis.PRE_WINDOW_DAYS}-day "
              "pre-period through campaign end.\n")
-    L.append("- **control_n** -- households not in this campaign and not in any campaign "
-             "overlapping its analysis window. This is the group Phase 6c would use.\n"
+    L.append("- **treated_n** -- households enrolled in this campaign.\n"
+             "- **clean_treated_n** -- those *not* also enrolled in an overlapping "
+             "campaign. This is the treatment group Phase 6c would use, and the one the "
+             "size screen applies to: an estimate on the full enrolled set measures this "
+             "campaign plus whatever else those households were in.\n"
+             "- **control_n** -- households not in this campaign and not in any campaign "
+             "overlapping its analysis window.\n"
              "- **strict_control_n** -- households in *no* campaign at all. Cleaner where "
              "it exists, but a single blanket campaign can empty it without invalidating "
-             "the comparison, so it does not drive the verdict.\n"
-             "- **contaminated_n** -- treated households also enrolled in an overlapping "
-             "campaign.\n")
+             "the comparison, so it does not drive the verdict.\n")
     L.append(blanket_note + "\n")
 
     cols = ["campaign", "type", "start_day", "end_day", "pre_days", "post_days",
-            "treated_n", "control_n", "strict_control_n", "overlapping_campaigns",
-            "contaminated_pct", "pre_weeks", "slope_gap", "viable", "reasons"]
+            "treated_n", "clean_treated_n", "contaminated_pct", "control_n",
+            "strict_control_n", "overlapping_campaigns", "pre_weeks", "slope_gap",
+            "viable", "reasons"]
     L.append("| " + " | ".join(cols) + " |")
     L.append("|" + "---|" * len(cols))
     for _, r in camp.iterrows():
@@ -216,11 +233,12 @@ def build_report(
                  "specified without redesign. See the `reasons` column for what fails.\n")
     else:
         best = camp[camp["viable"]].iloc[0]
-        L.append(f"**{n_viable} campaign(s) viable.** Strongest candidate: "
+        L.append(f"**{n_viable} campaign(s) viable.** Cleanest candidate: "
                  f"campaign {best['campaign']} ({best['type']}) -- "
-                 f"{best['pre_days']}d pre-period, {best['treated_n']} treated vs "
-                 f"{best['control_n']} control, "
-                 f"{best['contaminated_pct']}% contaminated.\n")
+                 f"{best['pre_days']}d pre-period, {best['clean_treated_n']} "
+                 f"uncontaminated treated (of {best['treated_n']} enrolled, "
+                 f"{best['contaminated_pct']}% contaminated) vs "
+                 f"{best['control_n']} control.\n")
         L.append("`slope_gap` is the difference in pre-period weekly-spend trend between "
                  "groups. It is a smell test, not a parallel-trends test -- Phase 6c must "
                  "still run the formal check and report violations.\n")
@@ -283,15 +301,15 @@ def run(raw_dir: Path, out_path: Path) -> pd.DataFrame:
         f"Household reach by campaign type (vs {_fmt(panel_n)} panel households): {reach}"
     )
 
-    vt = Table(title="Campaign viability (top 12)")
-    for c in ["campaign", "type", "pre_days", "treated_n", "control_n", "viable", "reasons"]:
+    vt = Table(title="Campaign viability (ranked by contamination)")
+    for c in ["campaign", "type", "treated", "clean", "contam%", "control", "viable"]:
         vt.add_column(c, overflow="fold")
     for _, r in camp.head(12).iterrows():
         vt.add_row(
-            str(r["campaign"]), str(r["type"]), str(r["pre_days"]),
-            str(r["treated_n"]), str(r["control_n"]),
+            str(r["campaign"]), str(r["type"]), str(r["treated_n"]),
+            str(r["clean_treated_n"]), f"{r['contaminated_pct']}",
+            str(r["control_n"]),
             "[green]yes" if r["viable"] else "[red]no",
-            "" if r["viable"] else str(r["reasons"]),
         )
     console.print(vt)
 
