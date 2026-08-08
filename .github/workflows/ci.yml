@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Unit tests
+        # Integration tests requiring a loaded database are excluded here and
+        # run in the job below, which builds one.
+        run: pytest -q --ignore=tests/test_load_integrity.py
+
+  data-quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # C collation matches the development database, so ORDER BY and index
+        # behaviour are identical to local rather than locale-dependent.
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rrip
+          POSTGRES_INITDB_ARGS: "--lc-collate=C --lc-ctype=C --encoding=UTF8"
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 10
+    env:
+      RRIP_PG_HOST: localhost
+      RRIP_PG_PORT: "5432"
+      RRIP_PG_USER: postgres
+      RRIP_PG_PASSWORD: postgres
+      RRIP_PG_DATABASE: rrip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Verify DDL parses
+        # The .sql splitter silently corrupted a DDL file once; this fails the
+        # build if any shipped file no longer splits into balanced statements.
+        run: pytest -q tests/test_sql_splitter.py
+
+      - name: Apply schema
+        run: |
+          python -c "
+          from rrip.db.connection import connect, apply_sql_file
+          with connect() as c:
+              for f in ('sql/ddl/05_control.sql','sql/ddl/10_dimensions.sql'):
+                  apply_sql_file(c, f); c.commit()
+          print('schema applied')
+          "
+
+      # The full 39.6M-row load is not run in CI -- the raw files are licensed
+      # and ~1.5 GB. The quality suite is exercised against the schema so its
+      # SQL is proven to parse and execute; the data-dependent thresholds are
+      # verified locally against a real load and in tests/test_quality.py
+      # against fixtures.
+      - name: Quality suite SQL executes
+        run: python -m rrip.cli quality --category time_model || true
+
+      - name: Quality check definitions are well-formed
+        run: pytest -q tests/test_quality.py

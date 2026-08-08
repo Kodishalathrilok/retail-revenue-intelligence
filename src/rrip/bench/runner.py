@@ -135,8 +135,16 @@ def start_run(conn: psycopg.Connection, variant: str, label: str) -> int:
 
 
 def measure(conn: psycopg.Connection, run_id: int, name: str, sql: str,
-            cache_state: str, rep: int) -> dict:
-    """Run one repetition under EXPLAIN (ANALYZE, BUFFERS) inside a clean window."""
+            cache_state: str, rep: int, setup_sql: str | None = None) -> dict:
+    """Run one repetition under EXPLAIN (ANALYZE, BUFFERS) inside a clean window.
+
+    `setup_sql` runs immediately before the measured statement, in the same
+    session -- used for per-session settings such as work_mem. It runs outside
+    the measured window so its own cost is not attributed to the query.
+    """
+    if setup_sql:
+        with conn.cursor() as cur:
+            cur.execute(setup_sql)  # type: ignore[arg-type]
     with conn.cursor() as cur:
         cur.execute("SELECT pg_stat_reset_shared('bgwriter')")
     conn.commit()

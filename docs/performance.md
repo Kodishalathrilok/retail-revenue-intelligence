@@ -449,3 +449,201 @@ Two findings worth noting for the fixes:
   nothing here.
 - **Q5 reads zero blocks from outside cache** (`shared_read=0`) — its 8.7s is
   entirely CPU and 6,987 blocks of temp spill, so an index will not help it.
+
+## Entry 2 results — one intervention per query
+
+### Q1 — partition pruning failure → predicate rewrite
+
+**2.09× faster.** Median 4,964.4 ms → 2,378.7 ms. Blocks read fell from 199,903
+to 51,207; partitions in the plan from 102 to 27.
+
+#### The first rewrite got faster and did not do what it claimed
+
+This is the clearest argument in this document for recording a plan hash next to
+every timing.
+
+The intended fix was to constrain the partition key. The first attempt derived
+the week bounds from `dim_week` so the query would survive a change to the
+calendar anchor:
+
+```sql
+WHERE fc.week_no >= (SELECT min(week_no) FROM dim_week WHERE end_date >= DATE '2015-06-01')
+```
+
+| Variant | Plan hash | Median | `shared_read` | Partitions in plan |
+|---|---|---:|---:|---:|
+| before | `6cf4a1a3` | 4,964.4 ms | 199,903 | **102 of 102** |
+| v1 — scalar subquery bounds | `6afea277` | 3,666.6 ms | 96,991 | **102 of 102** |
+| v2 — plan-time constants | `a0d03295` | **2,378.7 ms** | 51,207 | **27 of 102** |
+
+**v1 was 1.35× faster and pruned nothing.** A scalar subquery is not evaluated
+until execution, so the planner has no value to prune against and must keep every
+partition. The speedup came from switching some partitions to index scans on the
+primary key's leading `week_no` column — a real improvement, and not the claimed
+one.
+
+Reported on timing alone, v1 would have been published as "partition pruning
+restored, 1.35× faster". The plan hash changing said *something* was different;
+the partition count said it was not pruning.
+
+**v2 uses literal week bounds and prunes to 27 of 102.** The cost is real:
+plan-time pruning requires plan-time constants, so callers must resolve a date
+window to week numbers *before* the query is planned. That constraint is
+documented in the query header rather than discovered later.
+
+#### The `Subplans Removed` correction
+
+The original mechanism check looked for `Subplans Removed > 0`. That counter
+reports **execution-time** pruning only. v2's partitions are eliminated at *plan*
+time and never enter the plan at all, so `Subplans Removed` stays 0 in the
+optimized query — the check would have reported the successful fix as a failure.
+
+**Partition count in the plan is the correct signal**, and the check now uses it.
+
+### Q2 — sort spill → `work_mem` sweep: NO RELIABLE IMPROVEMENT
+
+The baseline spilled 85,444 blocks (~667 MB) in a Sort node. `HashAgg Batches`
+was 0, so `hash_mem_multiplier` — the obvious wrong knob — would have done
+nothing.
+
+| `work_mem` | Median | Min | Max | `temp_written` | Plan hash |
+|---|---:|---:|---:|---:|---|
+| 32MB (baseline) | 43,691 ms | 42,769 | 46,324 | 85,444 | `164a8d4a` |
+| 64MB | 46,918 ms | 44,152 | **231,129** | 85,384 | `164a8d4a` |
+| 128MB | 29,244 ms | 29,212 | 43,862 | 85,363 | `164a8d4a` |
+| 256MB | 41,824 ms | 39,947 | 42,916 | 85,353 | `164a8d4a` |
+| **512MB** | **56,595 ms** | 39,324 | 60,341 | **0** | `164a8d4a` |
+
+**The intervention worked mechanically and failed at its purpose.** At 512MB the
+spill is eliminated entirely — `temp_written` drops from 85,444 blocks to zero —
+and median execution time becomes the **worst** in the sweep, 30% slower than the
+32MB baseline.
+
+Two things explain it. The machine has 7.7 GB of RAM; 512MB of `work_mem` per sort
+node per parallel worker competes with 1 GB of `shared_buffers` and the OS page
+cache that, as the cache-state section shows, is doing the real caching work. And
+Postgres's external merge sort is efficient — replacing it with a large in-memory
+sort under memory pressure is not automatically a win.
+
+**The plan hash is identical across every setting.** `work_mem` changed the
+strategy inside the Sort node without changing plan shape at all, which is exactly
+the case where timing differences are easiest to over-read.
+
+Run-to-run variance dominates: the 64MB setting produced a 231,129 ms outlier
+against its own 44,152 ms minimum — a 5.2× spread *within a single
+configuration*. No difference between settings survives that noise except the
+spill elimination, which is a counted quantity rather than a timed one.
+
+**Conclusion: `work_mem` is not the fix for this query.** Eliminating the spill is
+achievable and does not help. The honest next step is a different intervention —
+reducing the 12M candidate pairs the self-join generates — not a larger memory
+budget.
+
+### Q3 — non-sargable predicate → expression index: MARGINAL
+
+**Index built in 313 ms.** Median 550.3 ms → 497.5 ms, about 10% — within the
+noise band seen elsewhere in this document.
+
+The expression index is correct and demonstrably usable. Against the predicate in
+isolation:
+
+```
+Bitmap Index Scan on ix_dim_product_commodity_upper
+  Index Cond: ((upper(commodity_desc) >= 'SOFT DRINK') AND (upper(commodity_desc) < 'SOFT DRINL'))
+```
+
+But **the planner does not choose it in the full query**. It uses the plain
+`ix_dim_product_commodity` as a full index scan with the `upper()` predicate as a
+filter — a narrower substitute for a sequential scan, not a sargable lookup.
+
+The reason is that `dim_product` was never the bottleneck. It holds 92,353 rows
+against `fact_transactions`'s 2,595,732, and the query's cost is dominated by the
+fact-table side. Making a cheap access path cheaper does not move a total
+dominated by something else.
+
+**A non-sargable predicate is only worth fixing when that predicate is the
+bottleneck.** Here the mechanism was correctly identified and correctly fixed, on
+a table too small for the fix to matter.
+
+### Q4 — extended statistics: PRE-REGISTERED PREDICTION CONFIRMED
+
+The prediction recorded above, before running: *the estimate will improve, the
+join order will not change, execution time will be materially unchanged.*
+
+| | Worst estimate error | Estimated rows | Actual rows |
+|---|---:|---:|---:|
+| before | 5.9× under | 4,445 | 26,107 |
+| after `CREATE STATISTICS` | **5.7× under** | 4,544 | 26,107 |
+
+Median 4,892.4 ms → 4,731.0 ms — a 3% difference inside the noise band.
+
+`CREATE STATISTICS (dependencies, ndistinct)` applied cleanly to the partitioned
+parent. It moved the estimate from 4,445 to 4,544 rows against an actual 26,107:
+a genuine improvement of about 2% of the error, and nowhere near enough to change
+anything.
+
+**The prediction holds.** A 4–6× misestimate was never large enough to have driven
+the planner to a different plan shape, so correcting it produced no different
+shape. The right diagnostic tool, correctly aimed at a correctly identified
+mechanism, applied to an instance of it too small to matter.
+
+This is the most useful result in Entry 2. Knowing when a real technique is not
+worth reaching for is harder-won than knowing the technique, and it is only
+visible because the expectation was recorded before the measurement.
+
+### Q5 — repeated aggregation → materialized view, and the refresh economics
+
+**The query gets roughly 300,000× faster. That is the least interesting fact about
+it.**
+
+| | Value |
+|---|---:|
+| Query, before | 8,723.8 ms |
+| Query, from matview | **0.028 ms** |
+| Matview size | 48 kB (164 rows) |
+| `REFRESH MATERIALIZED VIEW` | 7,897.0 ms |
+| `REFRESH ... CONCURRENTLY` | 7,839.4 ms |
+
+A matview that turns a slow query into a fast one is unremarkable. What decides
+whether the system is better is refresh cost against query frequency.
+
+**Break-even is roughly one query per refresh.** A refresh costs 7,897 ms; each
+avoided execution saves 8,724 ms. Refreshed daily and queried once a day, the
+matview saves nothing. Queried a hundred times a day, it saves about 14 minutes of
+cumulative query time daily. The dashboard case — a retention curve loaded on
+every page view — sits firmly in the second regime.
+
+**Use `CONCURRENTLY`.** The two modes cost effectively the same (7,839 vs
+7,897 ms, a 0.7% difference well inside noise), because duration is dominated by
+recomputing the underlying aggregate rather than writing 48 kB. But the
+non-concurrent form takes an `ACCESS EXCLUSIVE` lock and blocks every reader for
+its whole eight seconds, while `CONCURRENTLY` does not. Same cost, strictly better
+availability. It requires a unique index, which `ux_mv_cohort_retention` provides.
+
+**Staleness.** This dataset is static — the panel ended at day 711 — so staleness
+is zero regardless of cadence, and the matview is unambiguously correct here. That
+is a property of the dataset, not of the technique: against live data, an
+eight-second refresh sets the floor on how fresh the retention curve can be, and a
+dashboard showing "retention as of 04:00" is making a claim that has to be true.
+The refresh timestamp should be surfaced with the numbers rather than implied.
+
+### Summary
+
+| Query | Mechanism | Intervention | Before | After | Verdict |
+|---|---|---|---:|---:|---|
+| Q1 | partition pruning failure | predicate rewrite | 4,964.4 ms | 2,378.7 ms | **2.09× — worked** |
+| Q2 | sort spill | `work_mem` sweep | 43,691 ms | 56,595 ms @512MB | **no reliable gain** |
+| Q3 | non-sargable predicate | expression index | 550.3 ms | 497.5 ms | **marginal** |
+| Q4 | join-order misestimate | `CREATE STATISTICS` | 4,892.4 ms | 4,731.0 ms | **no change, predicted** |
+| Q5 | repeated aggregation | materialized view | 8,723.8 ms | 0.028 ms | **works; refresh decides** |
+
+**One clear win, one marginal, three that did not move the number.** That
+distribution is the result, not a disappointing version of one. Every intervention
+was chosen for a mechanism identified from a plan before it was applied, and three
+of them showed that correctly diagnosing a mechanism does not mean the
+corresponding fix is worth applying to that instance of it.
+
+The queries that did not improve are more informative than the one that did. Q1's
+win came from making a filter reach the partition key — a structural property of
+the query. Q2, Q3 and Q4 tried to make an existing plan cheaper and found the plan
+was not where the cost was.

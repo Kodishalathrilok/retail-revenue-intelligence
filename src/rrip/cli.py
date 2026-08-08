@@ -91,5 +91,34 @@ def bench_summary(run_id: int = typer.Option(None, help="Defaults to latest run.
     summary(run_id)
 
 
+@app.command()
+def quality(
+    category: str = typer.Option("", help="Run only one category, e.g. 'time_model'."),
+) -> None:
+    """Phase 4: run the data quality suite. Exits non-zero on any failure."""
+    from rrip.quality.runner import run as run_quality
+
+    failures, _warnings, _path = run_quality(category or None)
+    if failures:
+        raise typer.Exit(code=1)
+
+
+@app.command("quality-list")
+def quality_list() -> None:
+    """List the data quality checks and what each one guards."""
+    from rich.console import Console
+
+    from rrip.quality.checks import CHECKS
+
+    console = Console()
+    for cat in sorted({c.category for c in CHECKS}):
+        console.print(f"\n[bold]{cat}[/bold]")
+        for c in [c for c in CHECKS if c.category == cat]:
+            console.print(f"  {c.name}  [dim]({c.rule}"
+                          f"{'' if c.threshold is None else f' {c.threshold}'})[/dim]")
+            if c.rationale:
+                console.print(f"      [dim]{c.rationale}[/dim]")
+
+
 if __name__ == "__main__":
     app()
