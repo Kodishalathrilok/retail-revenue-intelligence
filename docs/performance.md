@@ -335,7 +335,86 @@ actual plan matched is reported per query below — including where it did not.
 A query that turned out to be expensive for a different reason than predicted is
 recorded as such, not reshaped until it fits its label.
 
+### The cold/warm pair on Q1, and what it showed
+
+One measurement was taken with `shared_buffers` genuinely cleared by an elevated
+service restart. The result changes how every other number in this entry should
+be read.
+
+| Cache state | Execution | `shared_hit` | `shared_read` | I/O read time |
+|---|---:|---:|---:|---:|
+| **cold `shared_buffers`** | 4,493.0 ms | 151 | 199,904 | 107.1 ms |
+| warm | 5,281.9 ms | 152 | 199,903 | 30.7 ms |
+| warm | 4,571.9 ms | 149 | 199,903 | 1.4 ms |
+| warm | 4,230.0 ms | 149 | 199,903 | 0.5 ms |
+
+**Cold was not slower than warm.** Three things follow, and they matter more
+than the contrast the pair was taken to provide.
+
+**1. `shared_read` does not mean disk I/O.** It means "not found in
+`shared_buffers`". Q1 reads 199,903 blocks — 1,562 MB — on *every* execution
+regardless of cache state, because Postgres uses a small ring buffer
+(`BAS_BULKREAD`) for large sequential scans specifically so they cannot evict
+the entire cache. A large scan therefore never populates `shared_buffers` with
+its own pages, and repeat executions look identical to a first one.
+
+**2. The pages come from the OS file cache, which the restart did not clear** —
+and which cannot be cleared on Windows. Total I/O wait on the cold run was
+107 ms out of 4,493 ms: **2.4% of runtime**. Q1 is CPU-bound on the scan and
+join, not I/O-bound.
+
+**3. `pg_prewarm`'s effect on this query survives exactly one execution.** The
+first warm repetition of the before-run recorded `shared_hit=38,977` — the
+prewarmed pages. Every subsequent repetition recorded `shared_hit≈149`, because
+the ring buffer flushed them. That is direct evidence for the prewarm limitation
+disclosed above, rather than an assumption about it.
+
+**Run-to-run variance exceeds the cold/warm difference.** Q1's warm executions
+span 4,230–7,738 ms — a factor of **1.83×** — against a cold/warm I/O difference
+of ~107 ms. Reporting a single cold number against a single warm number would
+have described noise. This is why medians over 5 repetitions are reported with
+min and max, and why the labels matter less than the buffer counts.
+
+For this workload, "cold" and "warm" are close to meaningless distinctions. That
+is a finding, not a limitation of the method.
+
 ### Results
 
-*Pending — the before-run is in progress. Numbers will be generated from
-`perf_measurement`.*
+Before-run, unoptimized. 5 warm repetitions per query, zero discarded windows
+(no requested checkpoint fired during any measurement). One distinct `plan_hash`
+and one `query_sha256` per query across all 25 measurements, so the repetitions
+are provably like-for-like.
+
+| Query | Median | Min | Max | `shared_read` | `temp_written` | Plan |
+|---|---:|---:|---:|---:|---:|---|
+| Q1 promo by department | 6,283.8 ms | 4,597.3 | 7,738.2 | 199,903 | 0 | `6cf4a1a3` |
+| Q2 basket affinity | 39,535.6 ms | 37,850.5 | 41,432.0 | 48,179 | 85,445 | `164a8d4a` |
+| Q3 reorder by commodity | 550.3 ms | 503.7 | 729.5 | 4,530 | 0 | `e1531e91` |
+| Q4 promo lift by department | 4,892.4 ms | 4,689.2 | 7,537.3 | 21,373 | 44,460 | `67403ac1` |
+| Q5 cohort retention | 8,723.8 ms | 8,528.0 | 9,373.3 | 0 | 6,987 | `8e5baa32` |
+
+### Mechanism match: four of five
+
+| Query | Claimed mechanism | Verdict | Evidence from the recorded plan |
+|---|---|---|---|
+| Q1 | partition pruning failure | **match** | 102 of 102 `fact_causal` partitions in plan, `Subplans Removed=0` |
+| Q2 | sort spill to disk | **match** | `temp_written` 85,445 blocks (~667 MB), sort methods `top-N heapsort`, `external merge` |
+| Q3 | index-unusable predicate | **match** | `dim_product` via Seq Scan; `upper()` present in filter |
+| Q4 | join-order misestimate | **MISMATCH** | worst genuine error **5.9×** underestimate at a Nested Loop; `fact_causal` hash join 4.0× — both below the 10× threshold set before writing the query |
+| Q5 | repeated full-scan aggregation | **match** | 48 scan nodes over 24 distinct `fact_transactions` partitions — a 2.0× repeat factor |
+
+**Q4 is reported as a mismatch rather than adjusted to fit.** It is genuinely
+expensive and does spill 44,460 temp blocks, but it is not primarily a
+misestimate case. The consequence is carried into the fix: extended statistics
+were chosen to correct a misestimate that turns out to be 4–6×, not 10×+, so the
+planner may already be close enough that `CREATE STATISTICS` changes nothing.
+That is now the expected outcome, and the before and after estimates will be
+reported either way.
+
+Two findings worth noting for the fixes:
+
+- **Q2's spill is in a Sort node, not a HashAggregate** (`HashAgg Batches=0`).
+  The `work_mem` intervention targets a sort; `hash_mem_multiplier` would do
+  nothing here.
+- **Q5 reads zero blocks from outside cache** (`shared_read=0`) — its 8.7s is
+  entirely CPU and 6,987 blocks of temp spill, so an index will not help it.

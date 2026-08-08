@@ -28,17 +28,40 @@ def _relations(plan: dict, prefix: str) -> list[str]:
             if str(n.get("Relation Name", "")).startswith(prefix)]
 
 
-def _max_estimate_error(plan: dict) -> tuple[float, dict | None]:
-    """Largest actual/estimated row ratio across all nodes, and the node."""
+# Row-estimate error is only meaningful on nodes that *choose* something based
+# on the estimate. Sort, Aggregate, Limit and Gather nodes above a LIMIT report
+# truncated actual counts, which looks like a huge overestimate and is nothing
+# of the sort -- Q4's first reported "18.1x misestimate" was LIMIT 200 cutting a
+# sort short.
+ESTIMATE_RELEVANT = (
+    "Seq Scan", "Index Scan", "Index Only Scan", "Bitmap Heap Scan",
+    "Nested Loop", "Hash Join", "Merge Join",
+)
+
+
+def _max_estimate_error(plan: dict, min_rows: int = 100) -> tuple[float, dict | None]:
+    """Largest row-estimate error across all nodes, and the node responsible.
+
+    Postgres reports BOTH `Plan Rows` and `Actual Rows` **per loop**. An earlier
+    version of this function multiplied actual by `Actual Loops` without doing
+    the same to the estimate, which manufactured enormous ratios out of
+    perfectly accurate nested-loop inner scans: an index scan estimated at 1 row
+    per loop and delivering 1 row per loop across 130,537 loops was reported as
+    a 130,537x misestimate. It is a 1x estimate.
+
+    Both sides are now per-loop. Nodes returning fewer than `min_rows` are
+    skipped, because a 3-vs-30 ratio on a tiny node is noise, not a planning
+    failure worth naming.
+    """
     worst, worst_node = 1.0, None
     for n in walk(plan):
+        if n.get("Node Type") not in ESTIMATE_RELEVANT:
+            continue
         est = float(n.get("Plan Rows") or 0)
         act = float(n.get("Actual Rows") or 0)
-        loops = float(n.get("Actual Loops") or 1)
-        act_total = act * loops
-        if est <= 0:
+        if est <= 0 or max(est, act) < min_rows:
             continue
-        ratio = max(act_total / est, est / max(act_total, 1))
+        ratio = max(act / est, est / max(act, 1.0))
         if ratio > worst:
             worst, worst_node = ratio, n
     return worst, worst_node
@@ -78,11 +101,15 @@ def check_q3(plan: dict, rec: dict) -> tuple[bool, str]:
 def check_q4(plan: dict, rec: dict) -> tuple[bool, str]:
     """Predicted: correlated columns cause a >10x row misestimate."""
     ratio, node = _max_estimate_error(plan)
-    where = f"{node.get('Node Type')} on {node.get('Relation Name', 'n/a')}" if node else "n/a"
-    est = node.get("Plan Rows") if node else 0
-    act = (node.get("Actual Rows") or 0) * (node.get("Actual Loops") or 1) if node else 0
-    return ratio >= 10, (f"worst estimate error {ratio:,.1f}x at {where} "
-                         f"(estimated {est:,}, actual {act:,.0f})")
+    if node is None:
+        return False, "no node returned enough rows to assess estimate error"
+    where = f"{node.get('Node Type')} on {node.get('Relation Name') or 'join'}"
+    est = float(node.get("Plan Rows") or 0)
+    act = float(node.get("Actual Rows") or 0)
+    direction = "under" if act > est else "over"
+    return ratio >= 10, (f"worst estimate error {ratio:,.1f}x ({direction}estimate) "
+                         f"at {where}: estimated {est:,.0f} rows/loop, "
+                         f"actual {act:,.0f} rows/loop")
 
 
 def check_q5(plan: dict, rec: dict) -> tuple[bool, str]:

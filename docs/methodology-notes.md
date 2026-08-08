@@ -1,6 +1,6 @@
 # Methodology notes
 
-Six decisions in this project were made wrongly first and corrected against
+Seven decisions in this project were made wrongly first and corrected against
 evidence. They are written up here because the corrections are more informative
 than the final answers: each one would have produced a plausible-looking result
 that was quietly wrong, and each was caught by a specific measurement rather
@@ -250,9 +250,60 @@ a source, and the source disagreed.
 
 ---
 
+## 7. The mechanism verifier reported a 130,537× misestimate that was 1×
+
+**The decision.** Whether each Phase 2 benchmark query is expensive for the
+reason its header claims. Q4 predicted a row-estimate failure caused by
+correlated columns, and a checker was written to confirm it from the recorded
+plan.
+
+**What was wrong — twice.**
+
+First, the checker reported a **130,537× misestimate** at an index scan on
+`dim_product`. Postgres reports both `Plan Rows` and `Actual Rows` **per loop**.
+The checker multiplied actual rows by `Actual Loops` without doing the same to
+the estimate. An index scan estimated at 1 row per loop, delivering exactly 1
+row per loop across 130,537 loops, is a *perfect* estimate. It was reported as
+the worst planning failure in the plan.
+
+Corrected to compare per-loop against per-loop, it then reported **18.1×** at a
+Sort node. Also wrong: the query ends in `LIMIT 200`, which stops the sort early,
+so its actual output is truncated by design. A correct estimate looks like a
+large overestimate whenever a `LIMIT` sits above it. Row-estimate error is only
+meaningful on nodes that *choose* something from the estimate — scans and joins
+— so Sort, Aggregate, Gather and Limit are now excluded.
+
+**The result after both fixes.** Q4's largest genuine misestimate is **5.9×**, an
+underestimate at a Nested Loop, with the `fact_causal` hash join at 4.0×. Both
+are real and both are below the 10× threshold set before the query was written.
+
+**Q4 therefore does not match its claimed mechanism**, and is reported as a
+mismatch rather than adjusted until it matches.
+
+**Why it matters.** Each wrong version produced a confident **MATCH** with
+specific-looking evidence attached. "130,537×" is not a subtle error — but it
+appeared in a generated evidence string next to a green verdict, in exactly the
+format a reader trusts. The only reason it was caught is that the number was
+absurd enough to prompt reading the plan directly.
+
+The second error is the more dangerous of the two, because 18.1× is *plausible*.
+It clears the 10× bar, it sits on a real node, and nothing about it invites a
+second look. It would have been published as a confirmed mechanism, and the
+subsequent "fix" would have been extended statistics applied to a problem that
+was not there — followed by a confusing result where the statistics changed
+nothing.
+
+The pattern is error 6's, one level up: not an invented figure this time, but an
+invented *metric* — a computation that looked like a measurement and encoded a
+misunderstanding of what the source data meant. A figure can be checked against
+its source. A metric has to be checked against its definition, and there is no
+row to compare it to.
+
+---
+
 ## What generalises
 
-All six errors share a shape: each produced output that looked correct.
+All seven errors share a shape: each produced output that looked correct.
 Nothing crashed, nothing was empty, no test failed. The strict control group
 returned a plausible number, the 21 viable campaigns were a plausible finding, a
 Monday-anchored calendar is a plausible calendar, 36.8M rows is a plausible row
