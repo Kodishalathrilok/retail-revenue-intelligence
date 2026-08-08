@@ -12,6 +12,13 @@ is estimated, extrapolated, or carried over from a previous configuration.
 | Storage | KIOXIA NVMe SSD |
 | OS | Windows 11 |
 | Postgres | 16.13, UTF8 encoding, **C collation** |
+| Power | **AC only.** `STANDBYIDLE` and `HIBERNATEIDLE` are 0 on AC; on battery the machine still sleeps after 180s |
+
+**Any timed run on this machine must be on AC power.** That is not housekeeping
+— it is part of the hardware specification, because a run on battery sleeps
+after 180 seconds of no interactive input and the sleep time lands inside the
+measurement. The first Phase 1 load is a worked example of exactly that failure;
+see the next section.
 
 **Platform limits, stated up front rather than buried.** A benchmark that
 doesn't disclose what its platform cannot do isn't a benchmark.
@@ -42,6 +49,99 @@ Configuration is version-controlled in `sql/ddl/00_tuning.sql` and applied via
 | `synchronous_commit` | on | off |
 | `random_page_cost` | 1.1 | 1.1 |
 | `effective_io_concurrency` | 0 (forced) | 0 (forced) |
+
+## Measurement integrity: the first load was 72% sleep
+
+**The first measured Phase 1 load took 75.2 minutes. 72% of that — 3,247 of
+4,513 seconds — was the machine sitting in Modern Standby, not doing work.**
+
+After the fix described in Entry 1, the same load took 15.8 minutes. Comparing
+those two numbers directly gives **4.8×**, and that figure would have been
+wrong. The optimization is worth **1.40×**. The rest was a laptop asleep.
+
+This section exists because that mistake was one sentence away from being
+published, and because the same trap is open for every timing in this document.
+
+### The evidence
+
+The original run's 93 batches had a median of 14.1s. Windows Kernel-Power 506
+(enter standby) and 507 (exit standby) events map onto the four slowest almost
+exactly:
+
+| Batch | Started | Duration | Standby window | Standby duration |
+|---|---|---:|---|---:|
+| w32 | 12:30:26 | 22m 02s | 12:30:18 → 12:52:22 | 22m 04s |
+| w99 | 13:22:16 | 17m 47s | 13:21:10 → 13:40:04 | 18m 54s |
+| w59 | 12:59:14 | 12m 50s | 12:59:09 → 13:11:51 | 12m 42s |
+| w58 | 12:57:46 | 1m 28s | 12:57:39 → 12:59:09 | 1m 30s |
+
+The machine idled into standby whenever no interactive command was running,
+suspending the load mid-batch. The optimized run stayed awake: maximum batch
+12.1s, nothing above it.
+
+**w58 was nearly missed.** The first pass at this analysis filtered on "batches
+over 100 seconds", which caught three. w58 took 88.1s — six times the median,
+plainly anomalous, and below an arbitrary threshold chosen before anyone knew
+what the distribution looked like. It only surfaced when the *maximum excluding
+the known three* turned out to be 88.1s rather than something near the median.
+
+Excluding all four, the remaining 89 batches have a mean of 14.23s and a maximum
+of 31.4s — a distribution with no outliers left in it. That is the number the
+"before" column is built from.
+
+### What was ruled out first
+
+The stall pattern had several plausible database explanations. Each was measured
+before power management was considered:
+
+- **Data volume** — ruled out. The four affected batches averaged 411,037 rows
+  against 394,687 for the other 89, a 4% difference. The largest batch in the
+  run — 589,473 rows — was not among them and completed normally.
+- **Checkpoint pressure** — ruled out. `checkpoints_req` was 27 against
+  `checkpoints_timed` 2,597, roughly 1%. `max_wal_size` at 8GB was not the
+  constraint. (`pg_stat_bgwriter` is cumulative since 2026-07-07 and was not
+  snapshotted around the load window, so this is a ratio argument rather than an
+  isolated measurement; the lopsidedness makes it conclusive anyway.)
+- **Antivirus and cloud sync** — ruled out. OneDrive was not running, and
+  Defender's most recent scan was two days before the load window.
+- **Memory pressure** — plausible on 7.7 GB but not causal: the stalls
+  correlate with standby transitions to the second, not with memory conditions.
+
+### Why the correlation was detectable at all
+
+By accident. `etl_batch_log.logged_at` defaulted to `now()`, which in Postgres
+returns *transaction start* time — and the batch INSERT and its log row share a
+transaction. So `logged_at` recorded when each batch **began**, not when it was
+logged. That is what allowed each slow batch to be lined up against a standby
+window.
+
+Had it recorded the intended insert time, every stalled batch would have been
+timestamped at the *end* of its stall, and the correlation with the standby
+entry events would have been far less obvious.
+
+The column now defaults to `clock_timestamp()`, which is what was meant. The
+accident is recorded here because the diagnosis depended on it.
+
+### The rule this establishes
+
+**Never compare against the uncorrected 75.2-minute figure.** It is not a
+baseline; it is a baseline plus 54 minutes of sleep. Where a before/after is
+reported in this document, the "before" is the standby-corrected **22.1
+minutes** — the original run's 89 unaffected batches at their measured mean of
+14.23s, extrapolated across all 93.
+
+Three practices come out of this:
+
+1. **Confirm AC power and a zero standby timeout before any timed run.** On a
+   laptop, an unattended benchmark measures the power policy as much as the
+   query.
+2. **Report the distribution, not the total.** A mean hides a 90× outlier
+   completely, and the total merely looks disappointing rather than obviously
+   wrong. Median, max and outlier count would have exposed this immediately.
+3. **Do not filter outliers on a threshold picked before seeing the
+   distribution.** "Batches over 100 seconds" found three of the four. The
+   fourth was found by asking what the maximum was once the known outliers were
+   removed — which is a question with no threshold in it.
 
 ## Entry 1 — Phase 1 load: raw ingest vs constrained insert
 
@@ -86,74 +186,25 @@ CONFLICT` clause is removed.
 
 ### Results
 
-| | Original | Corrected |
+Both runs moved the same 36,771,279 rows. The "before" column is
+**standby-corrected** throughout, for the reasons given above.
+
+| | Original (standby-corrected) | Optimized |
 |---|---:|---:|
-| Rows | 36,771,279 | 36,771,279 |
-| Median batch | 14.1s | **10.1s** |
+| Median batch | 14.0s | **10.1s** |
+| Mean batch | 14.23s | **10.16s** |
 | Median throughput | 27,518 rows/s | **37,827 rows/s** |
-| Max batch | 1,322.3s | **12.1s** |
-| Batches > 100s | 3 | **0** |
-| Total (wall clock) | 4,513.4s (75.2 min) | 945.5s (15.8 min) |
-| **Total (comparable)** | **~1,400s (23.3 min)** | **945.5s (15.8 min)** |
-| **Speedup** | | **~1.48×** |
+| Max batch | 31.4s | **12.1s** |
+| **Total** | **~22.1 min** | **15.8 min** |
+| **Speedup** | | **1.40×** |
 
-**The wall-clock rows are not a fair comparison, and the reason matters — see
-below.** The honest figure is **1.48×**, not the 4.8× that 75.2 → 15.8 implies.
+Post-load steps, optimized run: foreign key validation 58.2s, index and deferred
+PK build 189.8s.
 
-Post-load steps, corrected run: foreign keys 58.2s, indexes including the
-deferred `fact_causal` PK 189.8s.
-
-### Why the totals are not comparable: the distribution, not the mean
-
-Reporting only totals would have hidden the most important thing in this run.
-
-Original-ordering batch distribution across 93 batches:
-
-| Statistic | Value |
-|---|---:|
-| Median | 14.1s |
-| Max | **1,322.3s** |
-| Batches over 100s | 3 |
-
-**Three batches consumed 3,159s of the 4,513s total — 70%.** At the median rate,
-the whole table loads in roughly 22 minutes. The mean is meaningless here; the
-distribution is the finding.
-
-Those three batches were not slow for any database reason:
-
-- **Not data volume.** They averaged 403,129 rows against 395,132 for normal
-  batches — a 2% difference. Normal batches ran up to 589,473 rows in 15s.
-- **Not checkpoint pressure.** `checkpoints_req` was 27 against
-  `checkpoints_timed` 2,597 — about 1%. `max_wal_size` at 8GB was not the
-  constraint. (Caveat: `pg_stat_bgwriter` is cumulative since 2026-07-07 and was
-  not snapshotted around the load window, so this is a ratio argument, not an
-  isolated measurement. The lopsidedness makes it conclusive regardless.)
-- **Not antivirus or cloud sync.** OneDrive was not running; Defender's last
-  scan was two days before the load window.
-
-**They were the laptop entering Modern Standby.** Windows Kernel-Power events
-506/507 map onto each stalled batch almost exactly:
-
-| Batch | Started | Duration | Standby window | Standby duration |
-|---|---|---:|---|---:|
-| w32 | 12:30:26 | 22m 02s | 12:30:18 → 12:52:22 | 22m 04s |
-| w59 | 12:59:14 | 12m 50s | 12:59:09 → 13:11:51 | 12m 42s |
-| w99 | 13:22:16 | 17m 47s | 13:21:10 → 13:40:04 | 18m 54s |
-
-The machine idled into standby whenever no interactive commands were running,
-suspending the load. The corrected run stayed awake throughout and recorded
-**zero** batches over 100s, with a maximum of 12.1s.
-
-So the corrected run is faster for two independent reasons, and only one is an
-optimization. Deferring the PK and dropping `ON CONFLICT` is worth **1.48×**.
-The rest of the apparent 4.8× is a sleeping laptop.
-
-**Before running any unattended benchmark on this machine**, disable standby —
-otherwise the measurement includes sleep cycles:
-
-```
-powercfg /change standby-timeout-ac 0
-```
+The optimization improves steady-state cost, which was never what dominated the
+original run's wall clock. Both facts are true and neither substitutes for the
+other: the ordering was genuinely wrong and is now fixed, *and* the headline
+75-minute figure was mostly a sleeping laptop.
 
 ### Other load measurements
 
