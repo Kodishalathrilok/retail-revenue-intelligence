@@ -174,6 +174,54 @@ threshold picked before profiling would fail in exactly this way — and to the
 Phase 6b anomaly detection, where a z-score cutoff chosen in advance decides
 which anomalies are capable of being reported at all.
 
+## Cache state: cold and warm are nearly the same thing here
+
+Benchmark write-ups usually treat cold and warm as a given distinction worth
+reporting separately. One measurement here was taken with `shared_buffers`
+genuinely cleared by an elevated service restart, to calibrate the warm-only
+numbers against. It showed the distinction is close to meaningless for this
+workload — and the buffer counts explain why.
+
+| Cache state | Execution | `shared_hit` | `shared_read` | I/O read time |
+|---|---:|---:|---:|---:|
+| **cold `shared_buffers`** | 4,493.0 ms | 151 | 199,904 | 107.1 ms |
+| warm | 5,281.9 ms | 152 | 199,903 | 30.7 ms |
+| warm | 4,571.9 ms | 149 | 199,903 | 1.4 ms |
+| warm | 4,230.0 ms | 149 | 199,903 | 0.5 ms |
+
+**Cold was not slower than warm.** Three things follow, and they matter more
+than the contrast the pair was taken to provide.
+
+### `shared_read` does not mean disk I/O
+
+It means "not found in `shared_buffers`". Q1 reads 199,903 blocks — 1,562 MB — on *every* execution
+regardless of cache state, because Postgres uses a small ring buffer
+(`BAS_BULKREAD`) for large sequential scans specifically so they cannot evict
+the entire cache. A large scan therefore never populates `shared_buffers` with
+its own pages, and repeat executions look identical to a first one.
+
+### The pages come from the OS file cache, which the restart did not clear
+
+And which cannot be cleared on Windows at all. Total I/O wait on the cold run was
+107 ms out of 4,493 ms: **2.4% of runtime**. Q1 is CPU-bound on the scan and
+join, not I/O-bound.
+
+### `pg_prewarm`'s effect survives exactly one execution
+
+The first warm repetition of the before-run recorded `shared_hit=38,977` — the
+prewarmed pages. Every subsequent repetition recorded `shared_hit≈149`, because
+the ring buffer flushed them. That is direct evidence for the prewarm limitation
+disclosed above, rather than an assumption about it.
+
+**Run-to-run variance exceeds the cold/warm difference.** Q1's warm executions
+span 4,230–7,738 ms — a factor of **1.83×** — against a cold/warm I/O difference
+of ~107 ms. Reporting a single cold number against a single warm number would
+have described noise. This is why medians over 5 repetitions are reported with
+min and max, and why the labels matter less than the buffer counts.
+
+For this workload, "cold" and "warm" are close to meaningless distinctions. That
+is a finding, not a limitation of the method.
+
 ## Entry 1 — Phase 1 load: raw ingest vs constrained insert
 
 ### The headline: same rows, same machine, 14× apart
@@ -335,49 +383,6 @@ actual plan matched is reported per query below — including where it did not.
 A query that turned out to be expensive for a different reason than predicted is
 recorded as such, not reshaped until it fits its label.
 
-### The cold/warm pair on Q1, and what it showed
-
-One measurement was taken with `shared_buffers` genuinely cleared by an elevated
-service restart. The result changes how every other number in this entry should
-be read.
-
-| Cache state | Execution | `shared_hit` | `shared_read` | I/O read time |
-|---|---:|---:|---:|---:|
-| **cold `shared_buffers`** | 4,493.0 ms | 151 | 199,904 | 107.1 ms |
-| warm | 5,281.9 ms | 152 | 199,903 | 30.7 ms |
-| warm | 4,571.9 ms | 149 | 199,903 | 1.4 ms |
-| warm | 4,230.0 ms | 149 | 199,903 | 0.5 ms |
-
-**Cold was not slower than warm.** Three things follow, and they matter more
-than the contrast the pair was taken to provide.
-
-**1. `shared_read` does not mean disk I/O.** It means "not found in
-`shared_buffers`". Q1 reads 199,903 blocks — 1,562 MB — on *every* execution
-regardless of cache state, because Postgres uses a small ring buffer
-(`BAS_BULKREAD`) for large sequential scans specifically so they cannot evict
-the entire cache. A large scan therefore never populates `shared_buffers` with
-its own pages, and repeat executions look identical to a first one.
-
-**2. The pages come from the OS file cache, which the restart did not clear** —
-and which cannot be cleared on Windows. Total I/O wait on the cold run was
-107 ms out of 4,493 ms: **2.4% of runtime**. Q1 is CPU-bound on the scan and
-join, not I/O-bound.
-
-**3. `pg_prewarm`'s effect on this query survives exactly one execution.** The
-first warm repetition of the before-run recorded `shared_hit=38,977` — the
-prewarmed pages. Every subsequent repetition recorded `shared_hit≈149`, because
-the ring buffer flushed them. That is direct evidence for the prewarm limitation
-disclosed above, rather than an assumption about it.
-
-**Run-to-run variance exceeds the cold/warm difference.** Q1's warm executions
-span 4,230–7,738 ms — a factor of **1.83×** — against a cold/warm I/O difference
-of ~107 ms. Reporting a single cold number against a single warm number would
-have described noise. This is why medians over 5 repetitions are reported with
-min and max, and why the labels matter less than the buffer counts.
-
-For this workload, "cold" and "warm" are close to meaningless distinctions. That
-is a finding, not a limitation of the method.
-
 ### Results
 
 Before-run, unoptimized. 5 warm repetitions per query, zero discarded windows
@@ -405,11 +410,37 @@ are provably like-for-like.
 
 **Q4 is reported as a mismatch rather than adjusted to fit.** It is genuinely
 expensive and does spill 44,460 temp blocks, but it is not primarily a
-misestimate case. The consequence is carried into the fix: extended statistics
-were chosen to correct a misestimate that turns out to be 4–6×, not 10×+, so the
-planner may already be close enough that `CREATE STATISTICS` changes nothing.
-That is now the expected outcome, and the before and after estimates will be
-reported either way.
+misestimate case.
+
+#### Pre-registered expectation for the Q4 intervention
+
+*Written before `CREATE STATISTICS` was run, and left unedited afterwards.*
+
+The 10× threshold for "this query is a misestimate case" was set before the
+query was written. The measured error came in at **5.9×**. Neither the query nor
+the intervention is being changed in response to that, because changing either
+now would be selecting a result after seeing the data — the same failure this
+document argues against elsewhere.
+
+So `CREATE STATISTICS (dependencies, ndistinct)` on the correlated
+`fact_causal` columns is applied as planned, and the prediction is recorded
+here in advance:
+
+> **Expected: extended statistics will improve the row estimate but will not
+> change the join order, and the execution time will be materially unchanged.**
+> A 4–6× error is not large enough to have driven the planner to a different
+> plan shape, so correcting it should not produce a different one.
+
+The test of that prediction is the **`plan_hash`**, not the clock. If the hash
+is unchanged, the plan shape is unchanged and any timing difference is
+run-to-run variance — which on this machine reaches 1.83× and would otherwise
+be easy to mistake for an improvement.
+
+If that is what happens, it is Entry 2's most useful result rather than a failed
+optimization: the right diagnostic tool, correctly aimed at a correctly
+identified mechanism, applied to an instance of it too small to matter. Knowing
+when a real technique is not worth reaching for is harder-won than knowing the
+technique.
 
 Two findings worth noting for the fixes:
 
