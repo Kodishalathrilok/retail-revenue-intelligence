@@ -33,7 +33,14 @@ ALTER SYSTEM SET maintenance_work_mem = '512MB';
 -- the planner toward sequential scans -- on its own enough to invalidate a
 -- before/after comparison.
 ALTER SYSTEM SET random_page_cost = 1.1;
-ALTER SYSTEM SET effective_io_concurrency = 200;
+
+-- effective_io_concurrency MUST be 0 on Windows: it drives posix_fadvise()
+-- prefetching, which the platform does not implement, and Postgres rejects any
+-- other value outright. The usual SSD recommendation of 100-200 is Linux-only.
+-- Consequence for Phase 2: no prefetch during bitmap heap scans, so those plans
+-- are slower here than the same query would be on Linux. Worth stating in
+-- docs/performance.md rather than leaving as an unexplained platform gap.
+ALTER SYSTEM SET effective_io_concurrency = 0;
 
 -- Write-ahead log ------------------------------------------------------------
 
