@@ -37,5 +37,37 @@ def profile(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def load(
+    raw_dir: Path = typer.Option(None, help="dunnhumby CSV directory. Defaults to .env."),
+    reset: bool = typer.Option(False, help="Drop and rebuild the schema first."),
+) -> None:
+    """Phase 1: load the star schema. Resumable -- rerun to continue after a failure."""
+    from rrip.config import settings
+    from rrip.ingest.loader import run
+
+    run(raw_dir or settings.raw_dir, reset=reset)
+
+
+@app.command()
+def reconcile() -> None:
+    """Compare loaded row counts against raw file line counts."""
+    from rich.console import Console
+
+    from rrip.ingest.loader import reconcile as _rec
+
+    console = Console()
+    ok = True
+    for table, source, expected, loaded, matched in _rec():
+        mark = "[green]OK  [/green]" if matched else "[red]FAIL[/red]"
+        dedup = f"  (source {source:,} less {source - expected:,} deduplicated)" \
+            if expected != source else ""
+        console.print(f"  {mark} {table:24s} expected={expected:>12,}  "
+                      f"loaded={loaded:>12,}{dedup}")
+        ok = ok and matched
+    if not ok:
+        raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":
     app()

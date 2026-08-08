@@ -26,7 +26,9 @@ BEGIN;
 -- schema is fact_causal, which is 14x larger. docs/performance.md reports the
 -- measured difference rather than asserting a win.
 -- ---------------------------------------------------------------------------
-CREATE TABLE fact_transactions (
+-- IF NOT EXISTS throughout this file: the loader resumes by re-running steps,
+-- so applying it twice must be a no-op rather than an error.
+CREATE TABLE IF NOT EXISTS fact_transactions (
     date_key          DATE     NOT NULL,
     basket_id         BIGINT   NOT NULL,
     product_id        INTEGER  NOT NULL,
@@ -61,6 +63,9 @@ CREATE TABLE fact_transactions (
 
     PRIMARY KEY (date_key, basket_id, product_id)
 ) PARTITION BY RANGE (date_key);
+-- The PK is kept inline here, unlike fact_causal: at 2.6M rows the maintenance
+-- cost is 52.8s total, not worth deferring, and keeping it means the natural
+-- key is enforced from the first row inserted.
 
 COMMENT ON TABLE fact_transactions IS
     'Grain: one row per (basket, product). Natural PK -- 0 duplicate '
@@ -78,7 +83,16 @@ COMMENT ON TABLE fact_transactions IS
 -- Source covers weeks 9-101 of 1-102, and 115 of 582 stores -- but those stores
 -- carry 98.6% of transactions, so 95.8% of transactions still join.
 -- ---------------------------------------------------------------------------
-CREATE TABLE fact_causal (
+-- NOTE: no PRIMARY KEY here, deliberately. It is added post-load in
+-- 40_indexes.sql.
+--
+-- Declaring the PK in this DDL means every one of the 93 partitions maintains a
+-- unique index for all 36.8M rows as they are inserted. Measured: that ordering
+-- ran at a median 27,518 rows/s and took 75.2 minutes. Moving secondary indexes
+-- to a post-load step -- which this project already did -- does nothing for a
+-- primary key, because the PK is part of the table definition. See
+-- docs/performance.md for the before/after.
+CREATE TABLE IF NOT EXISTS fact_causal (
     week_no    SMALLINT NOT NULL,
     product_id INTEGER  NOT NULL,
     store_id   INTEGER  NOT NULL,
@@ -88,9 +102,7 @@ CREATE TABLE fact_causal (
     -- profiling: pandas typed some chunks int and others str, so the distinct
     -- value set came back with both 0 and '0' as separate members.
     display    TEXT,
-    mailer     TEXT,
-
-    PRIMARY KEY (week_no, product_id, store_id)
+    mailer     TEXT
 ) PARTITION BY RANGE (week_no);
 
 COMMENT ON COLUMN fact_causal.display IS
@@ -104,7 +116,7 @@ COMMENT ON COLUMN fact_causal.mailer IS
 -- Small, but the only direct evidence of a household ACTING on an offer rather
 -- than merely receiving one. Not partitioned -- 2,318 rows.
 -- ---------------------------------------------------------------------------
-CREATE TABLE fact_coupon_redemption (
+CREATE TABLE IF NOT EXISTS fact_coupon_redemption (
     household_key   INTEGER  NOT NULL,
     day_number      SMALLINT NOT NULL,
     redemption_date DATE     NOT NULL,

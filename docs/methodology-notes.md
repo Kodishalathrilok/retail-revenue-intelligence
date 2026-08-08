@@ -141,14 +141,85 @@ enforced rather than assumed.
 
 ---
 
+---
+
+## 4. The uniqueness check was run on one table and not the other
+
+**The decision.** Which columns form the natural key of each fact table, and
+whether a surrogate key is needed.
+
+**What was wrong.** The probe checked `(basket_id, product_id)` uniqueness on
+`transaction_data`, found zero duplicates, and concluded the natural key was
+safe. It never ran the equivalent check on `causal_data`.
+
+`causal_data` turned out to contain **15,245 duplicate
+`(week_no, product_id, store_id)` rows** out of 36.8M. This surfaced during the
+Phase 1 load, not during profiling — the load's `DISTINCT ON` collapsed them,
+and the row count mismatch is what exposed it.
+
+**Why it matters.** The consequence was not a crash. `fact_causal` declares that
+triple as its primary key, so the duplicates would have been rejected at insert
+time with a constraint violation, mid-load, after the expensive part had already
+run. Worse, the reconciliation step was written to compare loaded rows against
+raw file line counts — which now permanently disagree by 15,245 for a legitimate
+reason. A reconciliation that reports a false failure on a documented condition
+is one people learn to ignore.
+
+Both are now handled: the duplicate count is measured at load and recorded in
+`etl_data_quality`, and reconciliation subtracts it rather than comparing raw
+line counts.
+
+The generalisable error is narrower than "we missed a duplicate check". It is
+that a screen was applied to one instance of a category and not the others. The
+probe had the right check and ran it in one place.
+
+---
+
+## 5. Profiling money in float32 gave the wrong anomaly counts
+
+**The decision.** How many rows carry each known money anomaly — positive
+`retail_disc`, negative gross value — since these seed the Phase 4 assertion
+suite.
+
+**What was wrong.** The probe cast `sales_value` and `retail_disc` to `float32`
+to keep 2.6M rows small in memory. Float32 holds roughly 7 significant digits,
+which is enough to display a price correctly and not enough to compare one
+against zero reliably.
+
+Re-running the same checks against `NUMERIC(10,2)` after load:
+
+| Check | float32 | NUMERIC(10,2) |
+|---|---:|---:|
+| `retail_disc > 0` | 36 | **10** |
+| `sales_value - retail_disc < 0` | 17 | **1** |
+| `sales_value = 0` | 18,850 | **18,879** |
+
+Integer columns were unaffected — `quantity <= 0` and `quantity > 1000` matched
+exactly — which is what localises the cause to floating-point representation
+rather than to a logic difference between pandas and SQL.
+
+**Why it matters.** These counts were about to become assertion thresholds. A
+Phase 4 check asserting "exactly 17 rows have negative gross value" would fail
+against correctly loaded data, and the natural response to a failing assertion
+is to adjust the threshold — which would have encoded the float32 artifact
+permanently.
+
+It also retroactively justifies a decision made for a different reason.
+`NUMERIC(10,2)` was chosen for the schema because binary floating point does not
+sum money exactly; it turned out to matter for *comparing* money too, one
+analysis stage earlier than anticipated.
+
+---
+
 ## What generalises
 
-All three errors share a shape: each produced output that looked correct.
+All five errors share a shape: each produced output that looked correct.
 Nothing crashed, nothing was empty, no test failed. The strict control group
-returned a plausible number, the 21 viable campaigns were a plausible finding,
-and a Monday-anchored calendar is a plausible calendar.
+returned a plausible number, the 21 viable campaigns were a plausible finding, a
+Monday-anchored calendar is a plausible calendar, 36.8M rows is a plausible row
+count, and 17 is a plausible number of anomalies.
 
-Two things caught them, and neither was code review:
+Four things caught them, and none was code review:
 
 - **A synthetic dataset with deliberately seeded defects**, built because the
   real data had not arrived yet. It was constructed to include a blanket
@@ -156,6 +227,21 @@ Two things caught them, and neither was code review:
 - **Checking a derived value against its source rather than trusting the
   derivation.** `week_no` was recomputed and compared. Had it merely been
   derived and used, the mismatch would never have been visible.
+- **Recomputing the same measurement in a second system.** The float32 anomaly
+  counts looked fine until SQL disagreed with pandas. Neither was obviously
+  wrong on its own; the disagreement is what was informative.
+- **Reconciling totals rather than assuming them.** The 15,245 duplicates were
+  found because loaded rows were compared against source lines and the numbers
+  did not match — not because anyone suspected duplicates.
 
-Both are now permanent: the synthetic fixtures back the test suite, and the
-`week_no` check runs on every load.
+All four are now permanent: the synthetic fixtures back the test suite, the
+`week_no` check runs on every load, quality counts are measured in SQL against
+exact decimals and recorded in `etl_data_quality`, and reconciliation runs as a
+load step with an explicit, recorded allowance for deduplication.
+
+The remaining pattern worth naming is the one behind errors 4 and 5: both came
+from a check that was *correct* and applied *incompletely* — the right
+uniqueness test run on one of two fact sources, and the right anomaly queries
+run at the wrong precision. Neither was a missing idea. Both were a good idea
+applied to part of its domain, which is harder to notice than an absent check
+and is why they survived into the load.

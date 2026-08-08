@@ -99,3 +99,48 @@ Household reach by campaign type (vs 2,500 panel households): **TypeA** 1,513 (6
 **3 campaign(s) viable.** Cleanest candidate: campaign 26 (TypeA) -- 180d pre-period, 310 uncontaminated treated (of 332 enrolled, 6.6% contaminated) vs 2165 control.
 
 `slope_gap` is the difference in pre-period weekly-spend trend between groups. It is a smell test, not a parallel-trends test -- Phase 6c must still run the formal check and report violations.
+
+---
+
+## Corrections found after profiling
+
+Two findings below were **missed by this probe** and surfaced later, during the
+Phase 1 load. They are recorded here so the profile is not read as complete.
+
+### causal_data has 15,245 duplicate natural keys
+
+`causal_data` contains **15,245 duplicate `(week_no, product_id, store_id)`
+rows** out of 36,786,524. `fact_causal` deduplicates on load via `DISTINCT ON`,
+so it holds 36,771,279 rows.
+
+The probe verified `(basket_id, product_id)` uniqueness on transactions and
+confirmed zero duplicates there — then never ran the equivalent check on
+`causal_data`. The uniqueness screen was applied to one fact source and not the
+other, so a real data quality issue reached the loader instead of the profile.
+
+Reconciliation accounts for this explicitly: `fact_causal`'s expected row count
+is source lines minus the recorded duplicate count, read from
+`etl_data_quality`. Comparing raw line counts would report a permanent false
+failure on a documented condition.
+
+### The money anomaly counts above were distorted by float32
+
+This probe cast `sales_value` and `retail_disc` to `float32` for memory
+efficiency. Float32 carries roughly 7 significant digits, which puts values near
+zero on the wrong side of a comparison. The same checks run against
+`NUMERIC(10,2)` after load give different answers:
+
+| Check | This probe (float32) | Loaded (NUMERIC(10,2)) |
+|---|---:|---:|
+| `retail_disc > 0` | 36 | **10** |
+| `sales_value - retail_disc < 0` | 17 | **1** |
+| `sales_value = 0` | 18,850 | **18,879** |
+| `quantity <= 0` | 14,466 | 14,466 |
+| `quantity > 1000` | 23,101 | 23,101 |
+| `sales_value < 0` | 0 | 0 |
+
+**The NUMERIC figures are correct.** Counts on quantity — an integer column —
+were unaffected, which is why the discrepancy is confined to the money columns.
+
+The Phase 4 assertion suite reads the recorded values from `etl_data_quality`,
+measured at load against exact decimals, not the float32 figures above.
