@@ -38,6 +38,15 @@ CREATE INDEX IF NOT EXISTS ix_bch_household ON bridge_campaign_household (househ
 CREATE INDEX IF NOT EXISTS ix_bcp_product   ON bridge_coupon_product (product_id);
 CREATE INDEX IF NOT EXISTS ix_bcc_campaign  ON bridge_coupon_campaign (campaign_id);
 
+-- Product lookups by commodity family are a normal access path (Phase 3 slices
+-- reorder rate and affinity by commodity). Under C collation a plain
+-- `commodity_desc LIKE 'X%'` uses this index directly.
+--
+-- Note for Phase 2: this index is the reason Q3 is a non-sargable-predicate
+-- benchmark rather than a missing-index one. The index exists and is
+-- reasonable; wrapping the column in upper() is what defeats it.
+CREATE INDEX IF NOT EXISTS ix_dim_product_commodity ON dim_product (commodity_desc);
+
 -- dim_date is small but filtered constantly by the time-series queries.
 CREATE INDEX IF NOT EXISTS ix_dim_date_month ON dim_date (month_start);
 CREATE INDEX IF NOT EXISTS ix_dim_date_week  ON dim_date (week_no);

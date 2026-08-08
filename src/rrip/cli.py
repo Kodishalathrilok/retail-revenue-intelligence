@@ -69,5 +69,27 @@ def reconcile() -> None:
         raise typer.Exit(code=1)
 
 
+@app.command()
+def bench(
+    variant: str = typer.Option("before", help="'before' or 'after'."),
+    label: str = typer.Option("", help="Free-text note recorded with the run."),
+    reps: int = typer.Option(5, help="Warm repetitions per query."),
+    query: str = typer.Option("", help="Comma-separated query name prefixes, e.g. 'q1,q3'."),
+) -> None:
+    """Phase 2: measure the benchmark queries and record results."""
+    from rrip.bench.runner import run, summary
+
+    only = [q.strip() for q in query.split(",") if q.strip()] or None
+    run_id = run(variant, label, reps=reps, only=only)
+    summary(run_id)
+
+
+@app.command("bench-summary")
+def bench_summary(run_id: int = typer.Option(None, help="Defaults to latest run.")) -> None:
+    """Show recorded benchmark results."""
+    from rrip.bench.runner import summary
+    summary(run_id)
+
+
 if __name__ == "__main__":
     app()

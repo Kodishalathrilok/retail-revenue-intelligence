@@ -263,6 +263,79 @@ key enforcement from the first row.
 
 ## Entry 2 — Phase 2 query optimization
 
-Not yet run. Five deliberately expensive analytical queries with
-`EXPLAIN (ANALYZE, BUFFERS)` captured before and after indexing and
-materialized views, reported cold and warm.
+Five analytical queries, each expensive for a **different** mechanism, measured
+before and after a distinct intervention per query.
+
+### Methodology, including what was set up beforehand
+
+Every measurement is recorded in `perf_measurement` and this section is written
+from those rows. Nothing here is transcribed by hand.
+
+**Repetitions and statistics.** 5 warm repetitions per query. Median, min and max
+are reported — never a bare mean. Measurements are taken via
+`EXPLAIN (ANALYZE, BUFFERS, TIMING, FORMAT JSON)` with `track_io_timing` on.
+
+**Cache state is warm, and labelled warm.** Clearing `shared_buffers` requires
+restarting the Postgres service, which requires elevation the benchmark process
+does not have. Rather than label a warm run "cold", every measurement records
+`shared_hit` against `shared_read` so the actual cache state is visible as data
+rather than asserted. Windows has no supported way to clear the OS file cache at
+all, so even a service restart yields "cold `shared_buffers`, warm OS cache" —
+which is what the one deliberate cold measurement below is labelled.
+
+**One cold/warm pair, on Q1.** Q1 is the full-partition-scan case, where cache
+state matters most. It is measured once with `shared_buffers` cleared by an
+elevated service restart, to give the document a single documented cold-vs-warm
+contrast to calibrate the other warm-only numbers against.
+
+**Disclosure: an index was added before the baseline run.**
+`ix_dim_product_commodity ON dim_product (commodity_desc)` was created *before*
+the before-measurements, deliberately. Q3 demonstrates a **non-sargable
+predicate** — an index that exists and is reasonable, defeated by wrapping the
+column in `upper()`. Without the index in place, Q3 would instead have
+demonstrated a missing index, which is a different and far less interesting
+failure. The index is an access path Phase 3 uses regardless of this benchmark.
+
+This is stated here rather than left in a commit message because an index added
+by the person running the benchmark, undisclosed, reads as rigging the "before"
+number even when the reasoning is sound.
+
+**Disclosure: `pg_prewarm` cannot fully warm this machine.** Warm-up runs
+`pg_prewarm` over the dimensions and all 126 fact partitions in a fixed order.
+But `fact_causal` is 3,193 MB against 1 GB of `shared_buffers` — prewarming it
+caches the tail of the read, not the relation. Prewarm makes the starting state
+*reproducible*; it does not make it *complete*. Warm numbers for queries
+touching `fact_causal` therefore still involve real reads, which the
+`shared_read` column shows directly.
+
+**Checkpoint isolation.** `pg_stat_reset_shared('bgwriter')` runs immediately
+before each measurement and the counters are read immediately after, giving
+per-window counts rather than deltas against a cumulative baseline. (The earlier
+checkpoint analysis in this document used cumulative stats spanning a month of
+idle time, which is why it could only support a ratio argument.) Any window with
+`checkpoints_req > 0` is marked `discarded` with a reason and excluded from the
+statistics rather than silently kept. WAL bytes generated per window are
+recorded alongside.
+
+**Comparison integrity.** Each measurement stores the query text and its
+SHA-256, so a query edited between the before and after runs is detectable
+rather than assumed identical. Each also stores a `plan_hash` — a structural
+fingerprint over node types, relation names, index names and join strategies,
+excluding costs and timings — so a changed plan shape is distinguishable from a
+merely faster machine.
+
+**`effective_io_concurrency = 0`**, forced by Windows, applies throughout: no
+prefetch on bitmap heap scans. Cold numbers are inflated relative to Linux;
+warm numbers are unaffected.
+
+### Mechanism match
+
+Each query predicted a specific plan signature before being written. Whether the
+actual plan matched is reported per query below — including where it did not.
+A query that turned out to be expensive for a different reason than predicted is
+recorded as such, not reshaped until it fits its label.
+
+### Results
+
+*Pending — the before-run is in progress. Numbers will be generated from
+`perf_measurement`.*
