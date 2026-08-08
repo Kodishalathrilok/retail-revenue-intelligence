@@ -1,6 +1,6 @@
 # Methodology notes
 
-Three decisions in this project were made wrongly first and corrected against
+Six decisions in this project were made wrongly first and corrected against
 evidence. They are written up here because the corrections are more informative
 than the final answers: each one would have produced a plausible-looking result
 that was quietly wrong, and each was caught by a specific measurement rather
@@ -129,7 +129,7 @@ which matches on all 2,595,732 rows with zero exceptions.
 So day 6 opens the first full week and is the Monday anchor, which makes
 **day 1 a Wednesday**. The original plan was off by two days.
 
-**Why it matters.** This is the most dangerous of the three, because nothing
+**Why it matters.** This is the most dangerous error in this document, because nothing
 would have failed. Anchoring day 1 to a Monday produces a `dim_date` that looks
 entirely correct — 711 consecutive dates, sensible weeks, valid months. Joins to
 `causal_data` would succeed and return rows. They would just be the wrong rows,
@@ -138,8 +138,6 @@ shifted by two days, for every promotional analysis in the project.
 Because of this, a load-time assertion recomputes `week_no` from `day` on every
 transaction row and fails the load if a single row disagrees. The rule is now
 enforced rather than assumed.
-
----
 
 ---
 
@@ -211,9 +209,50 @@ analysis stage earlier than anticipated.
 
 ---
 
+## 6. A number was inferred instead of measured, inside the document about measuring
+
+**The decision.** What to report as the maximum batch duration in the original
+load, once the standby-affected batches were set aside.
+
+**What was wrong.** The results table in `docs/performance.md` claimed the
+maximum excluding standby was **15.9s**. Nobody measured it. The median was
+14.1s, the standby batches were obviously separate, so a value just above the
+median looked right and was written down.
+
+The measured value is **31.4s** — roughly double.
+
+**How it was caught.** By running the query before committing, as a final check.
+The same query also returned the maximum *before* excluding all known stalls as
+88.1s, which is how `w58` was found — so the fourth standby batch and the
+invented figure were caught by the same act of checking a number that had
+already been written as though it were known.
+
+**Why it matters.** This is the smallest error in this document and the most
+uncomfortable, because of where it happened. It appeared in a table inside a
+section arguing that benchmarks must report measured values, in a project whose
+stated first rule is that no metric may be invented.
+
+That is the actual lesson. The rule was not forgotten, disputed, or overridden —
+it was simply not applied at a moment when a plausible value was available and
+the cost of checking felt trivial. A wrong number that *looks* wrong gets
+queried. 15.9s looked entirely reasonable next to a 14.1s median, which is
+precisely why it survived to be written down.
+
+The failure mode is inference filling a gap where a query belonged. It leaves no
+trace in the output, because the output is a plausible number in a well-formed
+table.
+
+The practical guard is mechanical rather than attitudinal: every figure in a
+document must be traceable to a command that produced it. In this project the
+load and profile numbers come from `etl_load_control`, `etl_batch_log` and
+`etl_data_quality`, which is what made this one checkable at all — the value had
+a source, and the source disagreed.
+
+---
+
 ## What generalises
 
-All five errors share a shape: each produced output that looked correct.
+All six errors share a shape: each produced output that looked correct.
 Nothing crashed, nothing was empty, no test failed. The strict control group
 returned a plausible number, the 21 viable campaigns were a plausible finding, a
 Monday-anchored calendar is a plausible calendar, 36.8M rows is a plausible row

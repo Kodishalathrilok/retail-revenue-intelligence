@@ -130,7 +130,7 @@ reported in this document, the "before" is the standby-corrected **22.1
 minutes** — the original run's 89 unaffected batches at their measured mean of
 14.23s, extrapolated across all 93.
 
-Three practices come out of this:
+Two practices specific to this machine:
 
 1. **Confirm AC power and a zero standby timeout before any timed run.** On a
    laptop, an unattended benchmark measures the power policy as much as the
@@ -138,10 +138,41 @@ Three practices come out of this:
 2. **Report the distribution, not the total.** A mean hides a 90× outlier
    completely, and the total merely looks disappointing rather than obviously
    wrong. Median, max and outlier count would have exposed this immediately.
-3. **Do not filter outliers on a threshold picked before seeing the
-   distribution.** "Batches over 100 seconds" found three of the four. The
-   fourth was found by asking what the maximum was once the known outliers were
-   removed — which is a question with no threshold in it.
+
+And one that generalises well past this project:
+
+### Never filter outliers on a threshold chosen before seeing the distribution
+
+The first pass at this analysis asked for *batches over 100 seconds*. It
+returned three. The number 100 was not derived from anything — it was picked
+because the known stalls were in the four-figure range and 100 felt safely
+below them.
+
+`w58` took 88.1 seconds. Six times the median. Unambiguously anomalous. Invisible
+to the filter.
+
+It was found by asking a different question with no threshold in it: **what is
+the maximum, once the outliers I already know about are removed?** The answer
+came back 88.1s instead of something near the median, which is itself the
+finding — a clean distribution would have returned roughly 30s.
+
+The general form:
+
+> A threshold encodes what you already believe the distribution looks like. When
+> the distribution is the thing under investigation, the threshold is a
+> hypothesis being smuggled in as a filter — and anything it excludes is
+> invisible rather than merely absent.
+
+The safe alternatives ask the data to describe itself: sort and look at the tail;
+take the max after removing known cases; compare against the median rather than
+a constant; plot it. All of these would have caught `w58`. The threshold was the
+only approach that could not.
+
+This is a general analysis practice, not a benchmarking one. It applies directly
+to the Phase 4 data quality assertions — where a null-rate or row-count-drift
+threshold picked before profiling would fail in exactly this way — and to the
+Phase 6b anomaly detection, where a z-score cutoff chosen in advance decides
+which anomalies are capable of being reported at all.
 
 ## Entry 1 — Phase 1 load: raw ingest vs constrained insert
 
