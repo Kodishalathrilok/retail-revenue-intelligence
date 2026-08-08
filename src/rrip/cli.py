@@ -120,5 +120,16 @@ def quality_list() -> None:
                 console.print(f"      [dim]{c.rationale}[/dim]")
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Bind address."),
+    port: int = typer.Option(8000, help="Port."),
+    reload: bool = typer.Option(False, help="Auto-reload on code change."),
+) -> None:
+    """Phase 5: run the API."""
+    from rrip.api.run import serve as _serve
+    _serve(host=host, port=port, reload=reload)
+
+
 if __name__ == "__main__":
     app()

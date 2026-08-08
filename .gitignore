@@ -37,3 +37,6 @@ out/
 .idea/
 Thumbs.db
 desktop.ini
+
+# --- LLM development response cache ---
+.cache/
