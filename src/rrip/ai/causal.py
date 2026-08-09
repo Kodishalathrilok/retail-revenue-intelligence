@@ -228,9 +228,27 @@ def estimate_did(df: pd.DataFrame, confounders: list[str] | None = None,
         merged = df.merge(household_attrs, on="household_key", how="left")
         usable = [c for c in confounders
                   if c in merged.columns and merged[c].notna().sum() > 0]
+
+        # Postgres NUMERIC arrives as Decimal, which pandas types as `object`.
+        # A dtype==object test therefore misreads a continuous column as
+        # categorical: pre_spend has 2,430 distinct values, so C(pre_spend)
+        # built a 2,430-column design matrix and the fit took 341 seconds.
+        # Coerce anything numeric-convertible to float BEFORE deciding.
+        for c in usable:
+            if merged[c].dtype == object:
+                coerced = pd.to_numeric(merged[c], errors="coerce")
+                if coerced.notna().sum() == merged[c].notna().sum():
+                    merged[c] = coerced.astype(float)
+
         if usable:
-            terms = " + ".join(
-                f"C({c})" if merged[c].dtype == object else c for c in usable)
+            # Only genuine strings become categorical, and only if the level
+            # count is sane -- a high-cardinality categorical is almost always
+            # a misclassified continuous variable.
+            terms = []
+            for c in usable:
+                is_cat = merged[c].dtype == object and merged[c].nunique() <= 50
+                terms.append(f"C({c})" if is_cat else c)
+            terms = " + ".join(terms)
             adj = smf.ols(f"spend ~ treated * post + {terms}", data=merged).fit(
                 cov_type="cluster", cov_kwds={"groups": merged["household_key"]})
             out["adjusted_estimate"] = float(adj.params[term])

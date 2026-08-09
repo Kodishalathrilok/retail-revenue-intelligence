@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import random
 import time
 from abc import ABC, abstractmethod
@@ -159,29 +158,94 @@ class RateLimited(LLMError):
 
 
 class GeminiProvider(LLMProvider):
+    """Gemini free tier.
+
+    MODEL FALLBACK, and why it is not over-engineering: free-tier model
+    availability shifts without notice. Measured against a fresh key:
+
+        gemini-2.0-flash    429  "You exceeded your current quota"
+        gemini-2.5-flash    404  "no longer available to new users"
+        gemini-flash-latest 200  works
+
+    A 429 on a brand-new key is not throttling to back off from -- it means
+    that model has no free quota at all, and retrying it forever is wasted
+    time. So a 429 or 404 advances to the next model rather than sleeping,
+    and only the last model in the chain raises RateLimited.
+    """
+
     name = "gemini"
-    model = "gemini-2.0-flash"
+    # Ordered by preference. `-latest` aliases survive model retirements, which
+    # is exactly what broke the first two entries.
+    MODELS = ("gemini-flash-latest", "gemini-2.0-flash", "gemini-flash-lite-latest")
+    model = MODELS[0]
     endpoint = "https://generativelanguage.googleapis.com/v1beta/models"
 
     async def _call(self, prompt: str, system: str, temperature: float) -> str:
         body: dict = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": temperature,
-                                 "maxOutputTokens": 2048},
+            "generationConfig": {
+                "temperature": temperature,
+                # 8192, not 2048. The `-latest` aliases point at thinking
+                # models whose internal reasoning is billed against this same
+                # budget, so a 2048 ceiling left roughly 140 characters for the
+                # actual answer -- responses were truncated mid-JSON and
+                # surfaced as "response was not valid JSON", which points at
+                # the wrong problem entirely.
+                #
+                # thinkingConfig/thinkingBudget is NOT sent: this endpoint
+                # rejects it with 400 for these models. Headroom is the fix.
+                "maxOutputTokens": 8192,
+            },
         }
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
-        url = f"{self.endpoint}/{self.model}:generateContent"
+
+        # The key goes in a header, NOT ?key=. httpx includes the full request
+        # URL in HTTPStatusError messages, so a query-parameter key is printed
+        # verbatim into logs and tracebacks on every failure.
+        headers = {"x-goog-api-key": self.api_key or ""}
+
+        last_status, last_detail = None, ""
         async with httpx.AsyncClient(timeout=60) as client:
-            r = await client.post(url, params={"key": self.api_key}, json=body)
-        if r.status_code == 429:
-            raise RateLimited("gemini 429", _retry_after(r))
-        r.raise_for_status()
-        data = r.json()
-        try:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError) as exc:
-            raise LLMError(f"unexpected gemini response shape: {str(data)[:300]}") from exc
+            for i, model in enumerate(self.MODELS):
+                url = f"{self.endpoint}/{model}:generateContent"
+                r = await client.post(url, headers=headers, json=body)
+
+                if r.status_code in (404, 429):
+                    last_status, last_detail = r.status_code, r.text[:200]
+                    if i < len(self.MODELS) - 1:
+                        continue  # this model is unavailable; try the next
+                    raise RateLimited(
+                        f"gemini: every model in the fallback chain returned "
+                        f"{last_status}. Last: {last_detail}", _retry_after(r))
+
+                if r.status_code >= 400:
+                    # Raise our own error rather than httpx's, which embeds the
+                    # request URL and any credentials it carries.
+                    raise LLMError(
+                        f"gemini {model} returned {r.status_code}: {r.text[:300]}")
+                data = r.json()
+                # Record which model actually answered, so logs and responses
+                # report the truth rather than the preference.
+                self.model = model
+
+                cand = (data.get("candidates") or [{}])[0]
+                finish = cand.get("finishReason")
+                if finish and finish not in ("STOP", "FINISH_REASON_UNSPECIFIED"):
+                    # Report truncation as truncation. A MAX_TOKENS cut lands
+                    # mid-JSON and would otherwise be reported by the caller as
+                    # a parse error, sending the reader after the wrong bug.
+                    raise LLMError(
+                        f"gemini stopped early (finishReason={finish}); the "
+                        "response is incomplete. Raise maxOutputTokens or "
+                        "shorten the input.")
+                try:
+                    return cand["content"]["parts"][0]["text"]
+                except (KeyError, IndexError) as exc:
+                    raise LLMError(
+                        f"unexpected gemini response shape: {str(data)[:300]}") from exc
+
+        raise LLMError(f"gemini exhausted all models ({last_status}): {last_detail}")
 
 
 class GroqProvider(LLMProvider):
@@ -240,12 +304,22 @@ def _retry_after(r: httpx.Response) -> float | None:
 
 
 def get_provider(name: str | None = None, use_cache: bool = True) -> LLMProvider:
-    """Select a provider from config. Never hardcoded at a call site."""
-    chosen = (name or os.getenv("RRIP_LLM_PROVIDER") or "gemini").lower()
+    """Select a provider from config. Never hardcoded at a call site.
+
+    Keys come from the Settings object, NOT os.getenv(). pydantic-settings loads
+    .env into Settings and does not export to the process environment, so
+    os.getenv() silently returns None for a key that is correctly configured --
+    which presents as "provider not available" with no indication why.
+    """
+    from rrip.config import settings
+
+    chosen = (name or settings.llm_provider or "gemini").lower()
     if chosen == "gemini":
-        return GeminiProvider(os.getenv("GEMINI_API_KEY"), rpm=12, use_cache=use_cache)
+        return GeminiProvider(settings.gemini_api_key or None, rpm=12,
+                              use_cache=use_cache)
     if chosen == "groq":
-        return GroqProvider(os.getenv("GROQ_API_KEY"), rpm=25, use_cache=use_cache)
+        return GroqProvider(settings.groq_api_key or None, rpm=25,
+                            use_cache=use_cache)
     if chosen == "fake":
         return FakeProvider()
     raise ValueError(f"unknown provider {chosen!r}; expected gemini, groq or fake")

@@ -36,6 +36,17 @@ class Settings(BaseSettings):
         default=Path("data/raw/dunnhumby"), alias="RRIP_DUNNHUMBY_RAW_DIR"
     )
 
+    # --- LLM provider (Phase 6). Free tiers only. ---
+    #
+    # These live here rather than being read with os.getenv() in the provider:
+    # pydantic-settings loads .env into THIS object, not into os.environ, so
+    # os.getenv() never sees a key set in .env and every provider reports
+    # itself unavailable.
+    llm_provider: str = Field(default="gemini", alias="RRIP_LLM_PROVIDER")
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
+    llm_cache: bool = Field(default=True, alias="RRIP_LLM_CACHE")
+
     @property
     def raw_dir(self) -> Path:
         """Absolute path to the dunnhumby CSVs.
