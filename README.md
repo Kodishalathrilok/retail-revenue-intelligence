@@ -61,7 +61,51 @@ no day-of-week claims.
 | 2 — query performance | done | [`docs/performance.md`](docs/performance.md) |
 | 3 — analytical SQL | done | [`sql/analytics/`](sql/analytics/) — 8 queries |
 | 4 — data quality | done | 29 assertions, CLI, CI-wired |
-| 5–8 | not started | API, AI layer, frontend |
+| 5 — API | done | FastAPI, pooled async, keyset pagination |
+| 6 — AI layer | done | Validated NL→SQL, grounded narration, causal DiD |
+| 7 — frontend | done | Next.js 14 + Recharts, three views |
+| 8 — docs and deploy | done | [`docs/deployment.md`](docs/deployment.md) |
+
+### The AI layer, and the rule it is built around
+
+**The model never computes a number.** SQL and Python compute; the model
+proposes SQL, explains computed results, and suggests confounders. Nothing that
+reaches a user originates in a language model.
+
+That is enforced structurally, not by prompting:
+
+- **NL→SQL** passes five gates — single `SELECT`, forbidden-keyword scan against
+  SQL stripped of comments and string literals, `EXPLAIN` cost ceiling, guarded
+  execution, result shape — with rejections fed back for up to two retries.
+  Every gate result is returned and rendered.
+- **Narration** receives only a computed result set, and any number in its
+  response that is absent from that input causes the whole response to be
+  **rejected, not repaired**. An adversarial test suite tries to induce
+  fabricated figures; it found a real hole in the guard, which is now closed.
+- **Causal** lets the model propose confounders and nothing else. Proposals
+  outside the schema are discarded. Estimation is statsmodels.
+
+### Causal result, measured
+
+Difference-in-differences on campaign 26 (310 uncontaminated treated, 2,140
+control, parallel trends hold at p = 0.39):
+
+| | Estimate |
+|---|---:|
+| Naive before/after, treated only | **+6.53** |
+| Difference-in-differences | **+1.51** (p = 0.44, not distinguishable from zero) |
+| Adjusted for confounders | +0.45 |
+
+**The naive number is 4.3× the DiD estimate.** A dashboard reporting
+before/after on the treated group alone would claim an effect roughly four times
+larger than the data supports — and the DiD estimate is not statistically
+distinguishable from zero at all.
+
+Campaign 18 is retained as a contaminated counter-example: 90.8% of its enrolled
+households were simultaneously in an overlapping campaign, parallel trends are
+violated at p = 0.012, and the verdict is **NOT CREDIBLE**. It is also the
+largest campaign in the dataset — sorting by enrolment puts the worst candidate
+first.
 
 ### Performance work, honestly reported
 
@@ -99,7 +143,30 @@ rrip load        # resumable star-schema load
 rrip reconcile   # loaded rows vs source lines
 rrip quality     # 29 assertions; exits non-zero on failure
 rrip bench       # Phase 2 benchmark harness
+rrip serve       # FastAPI on :8000
 ```
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+For the AI layer, set `GEMINI_API_KEY` in `.env` (free tier). The provider is
+config-switched — Groq is the alternate — and falls back across Gemini models,
+because free-tier availability shifts: `gemini-2.0-flash` returns 429 quota
+exceeded on a new key and `gemini-2.5-flash` returns 404 for new users, while
+`gemini-flash-latest` works.
+
+## Deployment
+
+The full 3.7 GB database does not fit any free hosted tier — `fact_causal` alone
+is 3,193 MB. This deploys as an **aggregate-only tier**: roughly 50,000 rows of
+precomputed results (~12 MB) pushed to hosted Postgres, with the 39.6M-row load,
+the benchmark harness and causal estimation all staying local.
+
+That is a deliberate architecture with real consequences — hosted NL→SQL cannot
+answer transaction-level questions, and causal results are precomputed rather
+than live. Both are stated in [`docs/deployment.md`](docs/deployment.md) rather
+than left for a user to discover.
 
 ## Architecture
 

@@ -1,6 +1,6 @@
 # Methodology notes
 
-Seven decisions in this project were made wrongly first and corrected against
+Eight decisions in this project were made wrongly first and corrected against
 evidence. They are written up here because the corrections are more informative
 than the final answers: each one would have produced a plausible-looking result
 that was quietly wrong, and each was caught by a specific measurement rather
@@ -301,9 +301,77 @@ row to compare it to.
 
 ---
 
+## 8. A Decimal was read as a category, and the headline estimate was 5.5x wrong
+
+**The decision.** Which household covariates to adjust the difference-in-differences
+estimate for, and how to enter each one into the model.
+
+**What was wrong.** The adjusted estimate for campaign 26 was reported as
+**+2.5039**. The correct value is **+0.4510**.
+
+Postgres `NUMERIC` columns arrive in pandas as `Decimal` objects, and pandas
+types a column of `Decimal` as `object` — the same dtype it gives a column of
+strings. The model-building code decided how to enter each covariate with:
+
+```python
+f"C({c})" if merged[c].dtype == object else c
+```
+
+So `pre_spend`, a continuous currency column with **2,430 distinct values**, was
+wrapped in `C()` and expanded into a 2,430-column categorical design matrix. The
+fit ran for **341 seconds** and produced an estimate 5.5x the correct one.
+
+Nothing errored. statsmodels was asked to fit a valid model and did.
+
+**The correction.** Numeric-convertible columns are coerced to float before the
+dtype test, categoricals are capped at 50 levels, and — the actual guard —
+`assert_model_dtypes()` now runs before every fit and **raises** on an object
+column that should be numeric. Types are asserted, not inferred. The fit
+dropped from 341 seconds to 0.14.
+
+**Why it matters, and why it is in this document twice over.**
+
+This is the same failure as error 5: not a missing check, but *a correct
+operation applied at the wrong type, silently*. Error 5 was money profiled in
+float32, where 7 significant digits put values near zero on the wrong side of a
+comparison. This is money loaded as Decimal, where the dtype that carries exact
+precision is indistinguishable from the dtype that carries text.
+
+Both times the type system was technically satisfied. Both times the wrong
+answer looked entirely normal.
+
+**And this one had already been reported as a result.** The +2.5039 figure was
+given to the project owner as the adjusted causal estimate for campaign 26,
+alongside the naive and unadjusted numbers, before the bug was found. It was not
+flagged as provisional. It was wrong by a factor of 5.5.
+
+That is the argument for validating an estimator against synthetic data with a
+known true effect, and for re-running that validation whenever the estimator
+changes. A wrong estimate on real data is invisible — there is nothing to
+compare it against. On synthetic data with a planted effect there is.
+
+**Recovery accuracy after the fix**, on synthetic panels with known effects:
+
+| Scenario | True | Estimated | Abs error | CI covers truth |
+|---|---:|---:|---:|---|
+| clean, effect 5.0 | 5.0 | 5.285 | 0.285 | yes |
+| clean, no effect | 0.0 | 0.285 | 0.285 | yes |
+| clean, effect 20.0 | 20.0 | 20.285 | 0.285 | yes |
+| high noise | 5.0 | 5.713 | 0.713 | yes |
+| large level offset | 5.0 | 5.285 | 0.285 | yes |
+| **violated parallel trends** | 5.0 | **12.085** | **7.085** | **no** |
+
+Maximum absolute error across clean scenarios is 0.285, and the confidence
+interval covers the truth in 8 of 9 scenarios. The one miss is the scenario
+designed to fail: when parallel trends is violated the estimator recovers 12.085
+against a true 5.0, a 141.7% error — and the assumption check correctly reports
+the violation. An estimator that passed every scenario would not be under test.
+
+---
+
 ## What generalises
 
-All seven errors share a shape: each produced output that looked correct.
+All eight errors share a shape: each produced output that looked correct.
 Nothing crashed, nothing was empty, no test failed. The strict control group
 returned a plausible number, the 21 viable campaigns were a plausible finding, a
 Monday-anchored calendar is a plausible calendar, 36.8M rows is a plausible row

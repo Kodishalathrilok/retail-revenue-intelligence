@@ -73,6 +73,54 @@ Return ONLY JSON:
 }"""
 
 
+# Columns that must be numeric before any model fit. Postgres NUMERIC arrives as
+# Decimal, which pandas types as `object` -- indistinguishable by dtype from a
+# genuine string column, and silently misread as categorical.
+NUMERIC_COLUMNS = {
+    "spend", "baskets", "pre_spend", "pre_baskets", "coupon_offers",
+    "week_no", "day_number", "treated", "post",
+}
+
+# Above this many distinct values, a column claiming to be categorical is
+# almost certainly a misclassified continuous variable.
+MAX_CATEGORICAL_LEVELS = 50
+
+
+class DtypeError(TypeError):
+    """A column reached a model fit with a type that would be misinterpreted."""
+
+
+def assert_model_dtypes(df: pd.DataFrame, columns: list[str]) -> None:
+    """Fail loudly rather than let a type be inferred wrongly.
+
+    This exists because inference already failed once, expensively: pre_spend
+    arrived as Decimal, was typed `object`, was read as categorical, and
+    produced a 2,430-column design matrix. The fit took 341 seconds and
+    returned an estimate 5.5x the correct one. Nothing errored.
+
+    See docs/methodology-notes.md, error 8.
+    """
+    problems: list[str] = []
+    for c in columns:
+        if c not in df.columns:
+            continue
+        s = df[c]
+        if c in NUMERIC_COLUMNS:
+            if not pd.api.types.is_numeric_dtype(s):
+                problems.append(
+                    f"{c!r} must be numeric before fitting but has dtype "
+                    f"{s.dtype} (Decimal from a NUMERIC column types as object; "
+                    "coerce with pd.to_numeric)")
+        elif s.dtype == object and s.nunique() > MAX_CATEGORICAL_LEVELS:
+            problems.append(
+                f"{c!r} is object dtype with {s.nunique():,} distinct values; "
+                f"above {MAX_CATEGORICAL_LEVELS} it is treated as continuous, "
+                "because a categorical that wide is a misclassified number")
+    if problems:
+        bullets = "\n  - ".join(problems)
+        raise DtypeError(f"dtype assertion failed before model fit:\n  - {bullets}")
+
+
 @dataclass
 class ParallelTrends:
     passed: bool
@@ -210,6 +258,7 @@ def check_parallel_trends(df: pd.DataFrame, alpha: float = 0.05) -> ParallelTren
 def estimate_did(df: pd.DataFrame, confounders: list[str] | None = None,
                  household_attrs: pd.DataFrame | None = None) -> dict:
     """Two-way fixed effects DiD. Returns the estimate, never a verdict."""
+    assert_model_dtypes(df, ["spend", "treated", "post"])
     base = smf.ols("spend ~ treated * post", data=df).fit(
         cov_type="cluster", cov_kwds={"groups": df["household_key"]})
     term = "treated:post"
@@ -241,12 +290,16 @@ def estimate_did(df: pd.DataFrame, confounders: list[str] | None = None,
                     merged[c] = coerced.astype(float)
 
         if usable:
-            # Only genuine strings become categorical, and only if the level
-            # count is sane -- a high-cardinality categorical is almost always
-            # a misclassified continuous variable.
+            # Types are ASSERTED here, not inferred. Coercion above may have
+            # failed silently for a column that is genuinely non-numeric.
+            assert_model_dtypes(merged, usable)
+
+            # Only genuine strings become categorical, and only within a sane
+            # level count.
             terms = []
             for c in usable:
-                is_cat = merged[c].dtype == object and merged[c].nunique() <= 50
+                is_cat = (merged[c].dtype == object
+                          and merged[c].nunique() <= MAX_CATEGORICAL_LEVELS)
                 terms.append(f"C({c})" if is_cat else c)
             terms = " + ".join(terms)
             adj = smf.ols(f"spend ~ treated * post + {terms}", data=merged).fit(
