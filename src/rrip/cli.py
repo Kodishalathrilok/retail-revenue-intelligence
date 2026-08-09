@@ -122,13 +122,16 @@ def quality_list() -> None:
 
 @app.command()
 def serve(
-    host: str = typer.Option("127.0.0.1", help="Bind address."),
-    port: int = typer.Option(8000, help="Port."),
+    host: str = typer.Option("", help="Bind address. Defaults to RRIP_API_HOST."),
+    port: int = typer.Option(0, help="Port. Defaults to RRIP_API_PORT (8010)."),
     reload: bool = typer.Option(False, help="Auto-reload on code change."),
 ) -> None:
     """Phase 5: run the API."""
     from rrip.api.run import serve as _serve
-    _serve(host=host, port=port, reload=reload)
+    from rrip.config import settings
+
+    _serve(host=host or settings.api_host,
+           port=port or settings.api_port, reload=reload)
 
 
 @app.command()

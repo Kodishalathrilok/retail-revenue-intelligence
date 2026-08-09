@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     # local-only, which builds and measures the tables without pushing.
     publish_dsn: str = Field(default="", alias="RRIP_PUBLISH_DSN")
 
+    # --- API bind address ---
+    #
+    # Configurable rather than hardcoded. A port collision should be an env
+    # change, not a code change -- the last one was an orphaned dev server
+    # holding 8000, which presented as WinError 10013 and looked like a
+    # platform restriction rather than a stale process.
+    api_host: str = Field(default="127.0.0.1", alias="RRIP_API_HOST")
+    api_port: int = Field(default=8010, alias="RRIP_API_PORT")
+
     @property
     def raw_dir(self) -> Path:
         """Absolute path to the dunnhumby CSVs.

@@ -151,7 +151,7 @@ rrip load        # resumable star-schema load
 rrip reconcile   # loaded rows vs source lines
 rrip quality     # 29 assertions; exits non-zero on failure
 rrip bench       # Phase 2 benchmark harness
-rrip serve       # FastAPI on :8000
+rrip serve       # FastAPI on :8010 (set RRIP_API_PORT to change)
 ```
 
 ```bash

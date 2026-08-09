@@ -21,7 +21,7 @@ import asyncio
 import sys
 
 
-def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> None:
+def serve(host: str = "127.0.0.1", port: int = 8010, reload: bool = False) -> None:
     import uvicorn
 
     if sys.platform != "win32":

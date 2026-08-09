@@ -11,7 +11,7 @@ module.exports = {
     proxyTimeout: 60_000,
   },
   async rewrites() {
-    const api = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000';
+    const api = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8010';
     return [{ source: '/api/:path*', destination: `${api}/api/:path*` }];
   },
 };
