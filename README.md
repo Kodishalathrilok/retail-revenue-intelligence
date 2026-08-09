@@ -1,5 +1,13 @@
 # Retail Revenue Intelligence Platform
 
+**Repository:** https://github.com/Kodishalathrilok/retail-revenue-intelligence
+
+> **Deployment status: not yet live.** The aggregate tier is built and measured
+> (11.3 MB, 117,120 rows across 16 tables) and the hosting plan is in
+> [`docs/deployment.md`](docs/deployment.md), but nothing is deployed — see
+> *What runs where* below for exactly what a hosted visitor would and would not
+> be able to do.
+
 Analytics platform over the dunnhumby *Complete Journey* household panel:
 2,595,732 transactions and 36,771,279 rows of promotional exposure across 2,500
 households and 711 days, in PostgreSQL 16.
@@ -156,17 +164,40 @@ because free-tier availability shifts: `gemini-2.0-flash` returns 429 quota
 exceeded on a new key and `gemini-2.5-flash` returns 404 for new users, while
 `gemini-flash-latest` works.
 
-## Deployment
+## What runs where
 
 The full 3.7 GB database does not fit any free hosted tier — `fact_causal` alone
-is 3,193 MB. This deploys as an **aggregate-only tier**: roughly 50,000 rows of
-precomputed results (~12 MB) pushed to hosted Postgres, with the 39.6M-row load,
-the benchmark harness and causal estimation all staying local.
+is 3,193 MB. So this splits into two tiers, and **the split changes what a
+hosted visitor can actually do.** Stating that here rather than letting someone
+find it by hitting a wall:
 
-That is a deliberate architecture with real consequences — hosted NL→SQL cannot
-answer transaction-level questions, and causal results are precomputed rather
-than live. Both are stated in [`docs/deployment.md`](docs/deployment.md) rather
-than left for a user to discover.
+| | Local (full pipeline) | Hosted (aggregate tier) |
+|---|---|---|
+| Data | 39.6M rows, 3,713 MB | **117,120 rows, 11.3 MB** (measured) |
+| Executive overview | ✅ | ✅ from `pub_weekly_revenue*` |
+| Department drill-down | ✅ | ✅ from `pub_weekly_revenue_by_dept` |
+| RFM, retention, Pareto, affinity | ✅ | ✅ precomputed |
+| Causal DiD | ✅ live estimation | ⚠️ **precomputed results only** — cannot re-run against another campaign or window |
+| **NL→SQL** | ✅ full star schema | ⚠️ **aggregate tables only** |
+| Phase 2 benchmarks | ✅ | ❌ measurements of a specific machine |
+| 39.6M-row load | ✅ | ❌ stays local by design |
+
+**The NL→SQL restriction is the one that matters to a visitor.** In production
+the model writes against `pub_*` aggregates and the published dimensions — so
+"which 5 departments have the highest revenue?" works, and "which households
+bought product X?" does not, because `fact_transactions` is not published. The
+validation gates, cost ceiling and retry behaviour are identical in both tiers;
+only the schema is narrower.
+
+```bash
+rrip publish --local-only   # build and measure the aggregate tier
+rrip publish                # push to RRIP_PUBLISH_DSN
+```
+
+Publishing is idempotent — each table is dropped and recreated in its own
+transaction, verified by running it twice to identical output — and writes a
+`pub_manifest` row per table so a stale deployment is detectable rather than
+assumed fresh.
 
 ## Architecture
 

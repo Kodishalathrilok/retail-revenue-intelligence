@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
     llm_cache: bool = Field(default=True, alias="RRIP_LLM_CACHE")
 
+    # Target for `rrip publish` -- the hosted aggregate tier. Empty means
+    # local-only, which builds and measures the tables without pushing.
+    publish_dsn: str = Field(default="", alias="RRIP_PUBLISH_DSN")
+
     @property
     def raw_dir(self) -> Path:
         """Absolute path to the dunnhumby CSVs.

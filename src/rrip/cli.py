@@ -131,5 +131,18 @@ def serve(
     _serve(host=host, port=port, reload=reload)
 
 
+@app.command()
+def publish(
+    local_only: bool = typer.Option(
+        False, help="Build and measure the aggregate tier without pushing."),
+    dsn: str = typer.Option("", help="Target DSN. Defaults to RRIP_PUBLISH_DSN."),
+) -> None:
+    """Phase 8: build the pub_* aggregate tier and push it to hosted Postgres."""
+    from rrip.config import settings
+    from rrip.publish.publisher import run as _run
+
+    _run(dsn or settings.publish_dsn or None, local_only=local_only)
+
+
 if __name__ == "__main__":
     app()
