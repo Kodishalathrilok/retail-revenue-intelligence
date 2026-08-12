@@ -1,0 +1,44 @@
+# Fly.io config for the API tier.
+#
+# Chosen over Render because Render's free tier sleeps and takes ~30s to wake.
+# The causal endpoint already takes ~12s warm, so a cold start on top of that
+# reads as broken.
+
+app = "rrip-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  RRIP_API_HOST = "0.0.0.0"
+  RRIP_API_PORT = "8010"
+  RRIP_TIER = "published"
+
+[http_service]
+  internal_port = 8010
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # One machine always warm. Scaling to zero would put a cold start in front of
+  # an endpoint that is already slow.
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 40
+
+[[vm]]
+  # statsmodels needs the memory headroom; 256MB OOMs on the causal endpoint.
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[checks.health]
+  type = "http"
+  port = 8010
+  path = "/health"
+  interval = "30s"
+  timeout = "10s"
+  grace_period = "20s"
