@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import json
 import random
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -25,7 +26,29 @@ import httpx
 
 from rrip.config import PROJECT_ROOT
 
-CACHE_DIR = PROJECT_ROOT / ".cache" / "llm"
+
+def _cache_dir() -> Path:
+    """Where to keep the development response cache.
+
+    Serverless filesystems are read-only apart from a temp directory, so the
+    repo-relative default is unwritable in production -- writing there raised
+    OSError, which propagated as an LLM failure and was retried four times
+    against a filesystem that was never going to become writable.
+
+    Falls back to the system temp directory when the repo is not writable.
+    """
+    preferred = PROJECT_ROOT / ".cache" / "llm"
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        probe = preferred / ".writable"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+        return preferred
+    except OSError:
+        return Path(tempfile.gettempdir()) / "rrip-llm-cache"
+
+
+CACHE_DIR = _cache_dir()
 
 
 @dataclass
@@ -88,20 +111,28 @@ class LLMProvider(ABC):
     def _read_cache(self, prompt: str, system: str) -> str | None:
         if not self.use_cache:
             return None
-        p = self._cache_path(prompt, system)
-        if p.exists():
-            try:
+        try:
+            p = self._cache_path(prompt, system)
+            if p.exists():
                 return json.loads(p.read_text(encoding="utf-8"))["text"]
-            except Exception:
-                return None
+        except (OSError, ValueError, KeyError):
+            return None
         return None
 
     def _write_cache(self, prompt: str, system: str, text: str) -> None:
+        """Best effort. A cache is an optimisation, never a failure path.
+
+        This previously let an OSError escape, so a read-only filesystem turned
+        a successful model response into a failed request.
+        """
         if not self.use_cache:
             return
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        self._cache_path(prompt, system).write_text(
-            json.dumps({"text": text, "prompt": prompt[:500]}), encoding="utf-8")
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            self._cache_path(prompt, system).write_text(
+                json.dumps({"text": text, "prompt": prompt[:500]}), encoding="utf-8")
+        except OSError:
+            pass
 
     @abstractmethod
     async def _call(self, prompt: str, system: str, temperature: float) -> str: ...
