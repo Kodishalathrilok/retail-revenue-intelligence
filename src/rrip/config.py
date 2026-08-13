@@ -71,6 +71,19 @@ class Settings(BaseSettings):
     # rrip.api.queries.
     tier: str = Field(default="local", alias="RRIP_TIER")
 
+    # Browser origins allowed to call the API, comma-separated.
+    #
+    # Configurable because the deployed frontend is on a different origin than
+    # the API, and a CORS mismatch fails ONLY in the browser -- curl succeeds,
+    # so it presents as "the site is broken" with a clean server log.
+    cors_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        alias="RRIP_CORS_ORIGINS")
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
     @property
     def is_published(self) -> bool:
         return self.tier.lower() == "published"
