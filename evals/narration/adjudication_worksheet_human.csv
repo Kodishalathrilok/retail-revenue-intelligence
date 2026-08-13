@@ -1,0 +1,231 @@
+row_id,question,trusted_metrics,narration,label,category,note
+92844b8fafd8,What is the return on this campaign?,"{""columns"": [""campaign_id"", ""did_estimate""], ""question"": ""What is the return on this campaign?"", ""row_count"": 1, ""rows"": [{""campaign_id"": 26, ""did_estimate"": ""1.51""}], ""totals"": {""campaign_id"": {""maximum"": 26.0, ""mean"": 26.0, ""minimum"": 26.0, ""n_values"": 1, ""total"": 26.0}, ""did_estimate"": {""maximum"": 1.51, ""mean"": 1.51, ""minimum"": 1.51, ""n_values"": 1, ""total"": 1.51}}}","Campaign 26 achieved a return estimate of 1.51.
+For campaign ID 26, the estimated return value is 1.51.
+This provides the specific return metric recorded for this campaign.
+Data is limited to a single campaign ID and return estimate.",,,
+737951db7634,Give an overview of these segments.,"{""columns"": [""segment"", ""households"", ""revenue""], ""question"": ""Give an overview of these segments."", ""row_count"": 2, ""rows"": [{""households"": 512, ""revenue"": ""3900000.00"", ""segment"": ""Champions""}, {""households"": 300, ""revenue"": ""1200000.00"", ""segment"": ""Loyal""}], ""totals"": {""households"": {""highest_row"": {""households"": 512.0, ""segment"": ""Champions""}, ""lowest_row"": {""households"": 300.0, ""segment"": ""Loyal""}, ""maximum"": 512.0, ""mean"": 406.0, ""minimum"": 300.0, ""n_values"": 2, ""total"": 812.0}, ""revenue"": {""highest_row"": {""revenue"": 3900000.0, ""segment"": ""Champions""}, ""lowest_row"": {""revenue"": 1200000.0, ""segment"": ""Loyal""}, ""maximum"": 3900000.0, ""mean"": 2550000.0, ""minimum"": 1200000.0, ""n_values"": 2, ""total"": 5100000.0}}}","Overview of customer segments showing household counts and revenue distribution.
+The Champions segment consists of 512 households generating 3900000.00 in revenue.
+This segment represents the largest portion of the customer base and revenue.
+The Loyal segment comprises 300 households contributing 1200000.00 in revenue.
+Understanding this group helps target engagement and retention strategies.
+The analysis only covers two segments: Champions and Loyal.",,,
+b4b3e5962392,How many units per basket on average?,"{""columns"": [""units"", ""baskets""], ""rows"": [{""baskets"": 300, ""units"": 900}]}","Analysis of basket units shows the recorded totals for baskets and units.
+The dataset records a total of 900 units across 300 baskets.
+This provides the baseline volume of items purchased relative to total shopping trips in the dataset.
+The data only provides aggregate totals without individual basket distributions.",,,
+681af881473d,How many transactions and promotion rows are there?,"{""columns"": [""transactions"", ""promo_rows""], ""rows"": [{""promo_rows"": 36771279, ""transactions"": 2595732}]}","Analysis of the total transaction and promotion row counts
+The dataset contains 2595732 transactions and 36771279 promotion rows.
+Understanding the overall volume of transactions and promotion rows provides the baseline scale for evaluating sales and promotional performance.
+The data represents aggregated counts without further segmentation by product, store, or time.",,,
+9e7f63cc0a29,How did revenue change?,"{""change_over_period"": {""revenue"": {""absolute_change"": 0.0, ""direction"": ""no change"", ""from_period"": 12, ""from_value"": 5000.0, ""percent_change"": 0.0, ""to_period"": 13, ""to_value"": 5000.0}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""How did revenue change?"", ""row_count"": 2, ""rows"": [{""revenue"": ""5000.00"", ""week_no"": 12}, {""revenue"": ""5000.00"", ""week_no"": 13}], ""totals"": {""revenue"": {""maximum"": 5000.0, ""mean"": 5000.0, ""minimum"": 5000.0, ""n_values"": 2, ""total"": 10000.0}, ""week_no"": {""maximum"": 13.0, ""mean"": 12.5, ""minimum"": 12.0, ""n_values"": 2, ""total"": 25.0}}}","Revenue remained completely stable between week 12 and week 13.
+Revenue was recorded as 5000.00 in week 12 and 5000.00 in week 13, showing no change.
+Performance was consistent across both periods without growth or decline.
+Data is limited to week 12 and week 13.",,,
+1bed141b1f7b,What share of revenue does each department hold?,"{""columns"": [""department"", ""revenue""], ""notes"": [""shares of revenue are undefined because the total is 0.0""], ""question"": ""What share of revenue does each department hold?"", ""row_count"": 2, ""rows"": [{""department"": ""A"", ""revenue"": ""0.00""}, {""department"": ""B"", ""revenue"": ""0.00""}], ""totals"": {""revenue"": {""highest_row"": {""department"": ""A"", ""revenue"": 0.0}, ""lowest_row"": {""department"": ""A"", ""revenue"": 0.0}, ""maximum"": 0.0, ""mean"": 0.0, ""minimum"": 0.0, ""n_values"": 2, ""total"": 0.0}}}","Revenue shares across departments are undefined because the total revenue is 0.0.
+The total revenue recorded across the 2 departments is 0.0.
+Without any recorded revenue, individual departmental shares cannot be determined.
+shares of revenue are undefined because the total is 0.0",,,
+fde1e8d593a9,What is the reorder rate?,"{""columns"": [""reorder_rate""], ""question"": ""What is the reorder rate?"", ""row_count"": 1, ""rows"": [{""reorder_rate"": ""0.4271""}], ""totals"": {""reorder_rate"": {""maximum"": 0.43, ""mean"": 0.43, ""minimum"": 0.43, ""n_values"": 1, ""total"": 0.43}}}","The current reorder rate is 0.4271.
+The overall reorder rate stands at 0.4271.
+It shows the baseline proportion of customer reorders for the business.
+The data is limited to a single reorder rate figure of 0.4271.",,,
+b4bbefc8b294,What is the highest retention figure?,"{""columns"": [""tenure_month"", ""retention_pct""], ""rows"": [{""retention_pct"": ""100.00"", ""tenure_month"": 1}, {""retention_pct"": ""78.40"", ""tenure_month"": 2}, {""retention_pct"": ""71.20"", ""tenure_month"": 3}]}","The highest retention figure recorded is 100.00 percent, achieved at tenure month 1.
+Retention starts at 100.00 percent for tenure month 1.
+This establishes the baseline customer base at the beginning of the tenure period.
+Data is limited to the first three tenure months.",,,
+3a237b98c664,What is revenue by department?,"{""columns"": [""department"", ""revenue""], ""notes"": [""some values are NULL; they are excluded from totals and averages rather than treated as zero""], ""null_counts"": {""revenue"": 1}, ""question"": ""What is revenue by department?"", ""row_count"": 3, ""rows"": [{""department"": ""GROCERY"", ""revenue"": ""500.00""}, {""department"": ""DELI"", ""revenue"": null}, {""department"": ""MEAT"", ""revenue"": ""300.00""}], ""share_of_total"": {""measure"": ""revenue"", ""shares"": [{""department"": ""GROCERY"", ""pct_of_total"": 62.5, ""revenue"": 500.0}, {""department"": ""MEAT"", ""pct_of_total"": 37.5, ""revenue"": 300.0}], ""total"": 800.0}, ""totals"": {""revenue"": {""highest_row"": {""department"": ""GROCERY"", ""revenue"": 500.0}, ""lowest_row"": {""department"": ""MEAT"", ""revenue"": 300.0}, ""maximum"": 500.0, ""mean"": 400.0, ""minimum"": 300.0, ""n_values"": 2, ""total"": 800.0}}}","Revenue performance varies across departments with GROCERY generating the highest share and MEAT following.
+GROCERY achieved a revenue of 500.00, representing 62.5 percent of the total.
+It is the top performing department in terms of revenue.
+MEAT recorded a revenue of 300.00, representing 37.5 percent of the total.
+It contributes a smaller share of revenue compared to GROCERY.
+DELI has a null value for revenue and is excluded from totals and averages.",,,
+9efb2b6fc5a3,Describe the weekly figures.,"{""columns"": [""week_no"", ""revenue"", ""avg_basket""], ""rows"": [{""avg_basket"": ""30.00"", ""revenue"": ""600.00"", ""week_no"": 3}, {""avg_basket"": ""30.00"", ""revenue"": ""900.00"", ""week_no"": 4}]}","Weekly performance data shows results for week 3 and week 4.
+In week 3, the revenue was 600.00 and the avg_basket was 30.00.
+Provides the baseline performance for the first reported week.
+In week 4, the revenue was 900.00 and the avg_basket was 30.00.
+Shows the revenue change while the average basket size remained constant.
+Data is limited to week 3 and week 4.",,,
+d66dbe6f80d2,Compare revenue and baskets across these weeks.,"{""change_over_period"": {""baskets"": {""absolute_change"": 10.0, ""direction"": ""increase"", ""from_period"": 1, ""from_value"": 40.0, ""percent_change"": 25.0, ""to_period"": 2, ""to_value"": 50.0}, ""revenue"": {""absolute_change"": 200.0, ""direction"": ""increase"", ""from_period"": 1, ""from_value"": 1000.0, ""percent_change"": 20.0, ""to_period"": 2, ""to_value"": 1200.0}}, ""columns"": [""week_no"", ""revenue"", ""baskets""], ""period_column"": ""week_no"", ""question"": ""Compare revenue and baskets across these weeks."", ""row_count"": 2, ""rows"": [{""baskets"": 40, ""revenue"": ""1000.00"", ""week_no"": 1}, {""baskets"": 50, ""revenue"": ""1200.00"", ""week_no"": 2}], ""totals"": {""baskets"": {""maximum"": 50.0, ""mean"": 45.0, ""minimum"": 40.0, ""n_values"": 2, ""total"": 90.0}, ""revenue"": {""maximum"": 1200.0, ""mean"": 1100.0, ""minimum"": 1000.0, ""n_values"": 2, ""total"": 2200.0}, ""week_no"": {""maximum"": 2.0, ""mean"": 1.5, ""minimum"": 1.0, ""n_values"": 2, ""total"": 3.0}}}","Revenue and baskets increased between week 1 and week 2.
+In week 1, revenue was 1000.00 and baskets were 40, while in week 2 revenue reached 1200.00 and baskets grew to 50.
+Understanding the performance changes helps evaluate short-term store traffic and sales growth.
+Data is limited to 2 weeks of observation.",,,
+89d27cebec00,How many units per basket on average?,"{""columns"": [""units"", ""baskets""], ""question"": ""How many units per basket on average?"", ""row_count"": 1, ""rows"": [{""baskets"": 300, ""units"": 900}], ""totals"": {""baskets"": {""maximum"": 300.0, ""mean"": 300.0, ""minimum"": 300.0, ""n_values"": 1, ""total"": 300.0}, ""units"": {""maximum"": 900.0, ""mean"": 900.0, ""minimum"": 900.0, ""n_values"": 1, ""total"": 900.0}}}","Analysis of units and baskets shows the recorded totals for the dataset.
+The dataset records 900 units across 300 baskets.
+Provides the baseline volume and transaction count for the analysis.
+The data represents a single data point and totals without additional segmentation.",,,
+d8427995bbd3,What is total revenue?,"{""columns"": [""revenue""], ""rows"": [{""revenue"": ""1234567.891""}]}","Total revenue is recorded at 1234567.891.
+The total revenue recorded is 1234567.891.
+This provides the complete revenue figure for the analysis period.
+The data only provides a single revenue figure without additional context or breakdown.",,,
+6b2a39e5cb25,How much did revenue grow in relative terms?,"{""change_over_period"": {""revenue"": {""absolute_change"": 15000.0, ""direction"": ""increase"", ""from_period"": 10, ""from_value"": 50000.0, ""percent_change"": 30.0, ""to_period"": 11, ""to_value"": 65000.0}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""How much did revenue grow in relative terms?"", ""row_count"": 2, ""rows"": [{""revenue"": ""50000.00"", ""week_no"": 10}, {""revenue"": ""65000.00"", ""week_no"": 11}], ""totals"": {""revenue"": {""maximum"": 65000.0, ""mean"": 57500.0, ""minimum"": 50000.0, ""n_values"": 2, ""total"": 115000.0}, ""week_no"": {""maximum"": 11.0, ""mean"": 10.5, ""minimum"": 10.0, ""n_values"": 2, ""total"": 21.0}}}","Revenue grew from week 10 to week 11.
+Revenue increased from 50000.0 in week 10 to 65000.0 in week 11.
+This indicates positive revenue progression across the observed weeks.
+The data is limited to two weeks.",,,
+b4137e2a2246,How many baskets were recorded?,"{""columns"": [""baskets""], ""rows"": [{""baskets"": 276484}]}","A total of 276484 baskets were recorded in the analysis.
+The total number of baskets recorded stands at 276484.
+This figure provides the baseline volume of shopper transactions for further evaluation.
+The data only provides the total count of baskets without additional context.",,,
+7681ec9e7db8,What happened to revenue?,"{""columns"": [""week_no"", ""revenue""], ""rows"": [{""revenue"": ""40000.00"", ""week_no"": 88}, {""revenue"": ""30000.00"", ""week_no"": 89}]}","Revenue figures have been recorded across week 88 and week 89.
+In week 88, the revenue was 40000.00.
+Establishes the baseline performance for the first recorded period.
+In week 89, the revenue changed to 30000.00.
+Shows the revenue level for the subsequent period.
+Data is only available for week 88 and week 89.",,,
+f46bfe8ded33,Why did revenue increase?,"{""change_over_period"": {""revenue"": {""absolute_change"": 400.0, ""direction"": ""increase"", ""from_period"": 4, ""from_value"": 1000.0, ""percent_change"": 40.0, ""to_period"": 5, ""to_value"": 1400.0}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""Why did revenue increase?"", ""row_count"": 2, ""rows"": [{""revenue"": ""1000.00"", ""week_no"": 4}, {""revenue"": ""1400.00"", ""week_no"": 5}], ""totals"": {""revenue"": {""maximum"": 1400.0, ""mean"": 1200.0, ""minimum"": 1000.0, ""n_values"": 2, ""total"": 2400.0}, ""week_no"": {""maximum"": 5.0, ""mean"": 4.5, ""minimum"": 4.0, ""n_values"": 2, ""total"": 9.0}}}","Revenue increased between week number 4 and week number 5.
+Revenue went from 1000.0 in week number 4 to 1400.0 in week number 5, resulting in an absolute change of 400.0 and a percent change of 40.0.
+This upward movement demonstrates positive momentum across the tracked periods.
+Data is limited to week number 4 and week number 5.",,,
+8de1a4b40951,What was total revenue?,"{""columns"": [""revenue""], ""question"": ""What was total revenue?"", ""row_count"": 1, ""rows"": [{""revenue"": ""8598762.11""}], ""totals"": {""revenue"": {""maximum"": 8598762.11, ""mean"": 8598762.11, ""minimum"": 8598762.11, ""n_values"": 1, ""total"": 8598762.11}}}","Total revenue is recorded at 8598762.11.
+The total revenue figure stands at 8598762.11.
+This represents the complete revenue captured in the dataset for business evaluation.
+The analysis is based on a single data point representing the total.",,,
+f85a06525eda,Did the campaign period show growth?,"{""change_over_period"": {""revenue"": {""absolute_change"": -50.25, ""direction"": ""decrease"", ""from_period"": 45, ""from_value"": 1200.5, ""percent_change"": -4.19, ""to_period"": 46, ""to_value"": 1150.25}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""Did the campaign period show growth?"", ""row_count"": 2, ""rows"": [{""revenue"": ""1200.50"", ""week_no"": 45}, {""revenue"": ""1150.25"", ""week_no"": 46}], ""totals"": {""revenue"": {""maximum"": 1200.5, ""mean"": 1175.38, ""minimum"": 1150.25, ""n_values"": 2, ""total"": 2350.75}, ""week_no"": {""maximum"": 46.0, ""mean"": 45.5, ""minimum"": 45.0, ""n_values"": 2, ""total"": 91.0}}}","Revenue did not show growth during the observed campaign period, moving from week 45 to week 46.
+Revenue moved from 1200.5 in week 45 to 1150.25 in week 46, resulting in a decrease across the period.
+Tracking the weekly revenue direction helps determine campaign performance over time.
+The data only covers week 45 and week 46.",,,
+61ad67f7197d,What is the average basket value?,"{""columns"": [""basket_value""], ""rows"": [{""basket_value"": ""31.10""}]}","The average basket value is recorded at 31.10.
+The overall average basket value stands at 31.10.
+This metric provides a baseline for understanding typical customer transaction sizes.
+The data represents a single basket value observation.",,,
+c62810bb2782,What is the display coverage rate?,"{""columns"": [""display_pct""], ""rows"": [{""display_pct"": ""8.7""}]}","The display coverage rate is recorded at 8.7 percent.
+The display coverage rate is 8.7.
+It shows the exact portion of items or locations currently utilizing displays.
+The dataset only provides a single metric value without additional context.",,,
+092e4a52bf2f,How much did revenue grow in relative terms?,"{""columns"": [""week_no"", ""revenue""], ""rows"": [{""revenue"": ""50000.00"", ""week_no"": 10}, {""revenue"": ""65000.00"", ""week_no"": 11}]}","Revenue grew from week 10 to week 11.
+In week 10, revenue stood at 50000.00 and increased to 65000.00 in week 11.
+Understanding the revenue figures across these specific weeks shows the tracked top-line movement.
+The data only covers week 10 and week 11, so a broader trend cannot be determined from this set alone.",,,
+544ff41ac2e4,What is the income breakdown?,"{""columns"": [""income_desc"", ""households""], ""notes"": [""some values are NULL; they are excluded from totals and averages rather than treated as zero""], ""null_counts"": {""income_desc"": 1}, ""question"": ""What is the income breakdown?"", ""row_count"": 3, ""rows"": [{""households"": 1699, ""income_desc"": null}, {""households"": 450, ""income_desc"": ""50-74K""}, {""households"": 351, ""income_desc"": ""Under 15K""}], ""share_of_total"": {""measure"": ""households"", ""shares"": [{""households"": 1699.0, ""income_desc"": null, ""pct_of_total"": 67.96}, {""households"": 450.0, ""income_desc"": ""50-74K"", ""pct_of_total"": 18.0}, {""households"": 351.0, ""income_desc"": ""Under 15K"", ""pct_of_total"": 14.04}], ""total"": 2500.0}, ""totals"": {""households"": {""highest_row"": {""households"": 1699.0, ""income_desc"": null}, ""lowest_row"": {""households"": 351.0, ""income_desc"": ""Under 15K""}, ""maximum"": 1699.0, ""mean"": 833.33, ""minimum"": 351.0, ""n_values"": 3, ""total"": 2500.0}}}","Households are distributed across specified income brackets and an unspecified group.
+There are 1699 households with an unrecorded income description.
+Understanding this unspecified group is important for a complete picture of customer demographics.
+The 50-74K income bracket represents 450 households.
+This forms a distinct segment of the customer base.
+The Under 15K income bracket accounts for 351 households.
+This represents the lowest measured household count among the specific income groups.
+some values are NULL; they are excluded from totals and averages rather than treated as zero",,,
+c25ba0f68822,How many transactions and promotion rows are there?,"{""columns"": [""transactions"", ""promo_rows""], ""question"": ""How many transactions and promotion rows are there?"", ""row_count"": 1, ""rows"": [{""promo_rows"": 36771279, ""transactions"": 2595732}], ""totals"": {""promo_rows"": {""maximum"": 36771279.0, ""mean"": 36771279.0, ""minimum"": 36771279.0, ""n_values"": 1, ""total"": 36771279.0}, ""transactions"": {""maximum"": 2595732.0, ""mean"": 2595732.0, ""minimum"": 2595732.0, ""n_values"": 1, ""total"": 2595732.0}}}","The dataset contains counts for transactions and promotion rows.
+There are 2595732 transactions recorded in the dataset.
+Knowing the transaction volume helps measure customer activity levels.
+There are 36771279 promotion rows recorded in the dataset.
+Tracking promotion rows helps analyze marketing and promotional coverage.
+The data represents aggregated counts from the provided row and totals.",,,
+80ab470a1ae7,Which week was strongest and which weakest?,"{""change_over_period"": {""revenue"": {""absolute_change"": -6000.0, ""direction"": ""decrease"", ""from_period"": 7, ""from_value"": 70000.0, ""percent_change"": -8.57, ""to_period"": 9, ""to_value"": 64000.0}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""Which week was strongest and which weakest?"", ""row_count"": 3, ""rows"": [{""revenue"": ""70000.00"", ""week_no"": 7}, {""revenue"": ""91000.00"", ""week_no"": 8}, {""revenue"": ""64000.00"", ""week_no"": 9}], ""totals"": {""revenue"": {""maximum"": 91000.0, ""mean"": 75000.0, ""minimum"": 64000.0, ""n_values"": 3, ""total"": 225000.0}, ""week_no"": {""maximum"": 9.0, ""mean"": 8.0, ""minimum"": 7.0, ""n_values"": 3, ""total"": 24.0}}}","Week 8 achieved the highest revenue while week 9 recorded the lowest revenue.
+Week 8 generated a revenue of 91000.00, making it the strongest performing period.
+identifies the peak performing week in the dataset
+Week 9 dropped to a revenue of 64000.00, representing the weakest period.
+highlights the lowest point of revenue capture
+Analysis is limited to the three weeks provided in the dataset.",,,
+7e54cab6ce56,By what percentage did revenue grow?,"{""columns"": [""week_no"", ""revenue""], ""rows"": [{""revenue"": ""0.00"", ""week_no"": 1}, {""revenue"": ""500.00"", ""week_no"": 2}]}","Revenue data for week 1 and week 2 is available for analysis.
+In week 1, revenue was recorded at 0.00.
+Establishes the starting baseline for the tracking period.
+In week 2, revenue reached 500.00.
+Shows the revenue generated in the subsequent week.
+The dataset does not provide a growth percentage value.",,,
+5bdbc4a5d65c,How did revenue change?,"{""columns"": [""week_no"", ""revenue""], ""rows"": [{""revenue"": ""5000.00"", ""week_no"": 12}, {""revenue"": ""5000.00"", ""week_no"": 13}]}","Revenue remained stable at the same level across the recorded weeks.
+Revenue was recorded at 5000.00 for week 12.
+It establishes the baseline performance for the start of the tracking period.
+Revenue remained unchanged at 5000.00 for week 13.
+It indicates consistent weekly sales generation without growth or decline between these periods.
+Data is limited to only two weeks.
+No broader contextual factors or prior historical data are provided.",,,
+d49696c2347e,How much did revenue fall?,"{""change_over_period"": {""revenue"": {""absolute_change"": -19000.0, ""direction"": ""decrease"", ""from_period"": 60, ""from_value"": 95000.0, ""percent_change"": -20.0, ""to_period"": 61, ""to_value"": 76000.0}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""How much did revenue fall?"", ""row_count"": 2, ""rows"": [{""revenue"": ""95000.00"", ""week_no"": 60}, {""revenue"": ""76000.00"", ""week_no"": 61}], ""totals"": {""revenue"": {""maximum"": 95000.0, ""mean"": 85500.0, ""minimum"": 76000.0, ""n_values"": 2, ""total"": 171000.0}, ""week_no"": {""maximum"": 61.0, ""mean"": 60.5, ""minimum"": 60.0, ""n_values"": 2, ""total"": 121.0}}}","Revenue fell from week_no 60 to week_no 61.
+Revenue decreased from 95000.0 in week_no 60 to 76000.0 in week_no 61, representing an absolute_change of -19000.0 and a percent_change of -20.0.
+This drop indicates a downward trend in performance between the two recorded periods.
+The data only covers two periods, so this may not represent a long-term trend.",,,
+ad3e91ab0bd9,Compare these two segments.,"{""columns"": [""segment"", ""revenue""], ""question"": ""Compare these two segments."", ""row_count"": 2, ""rows"": [{""revenue"": ""2000.00"", ""segment"": ""X""}, {""revenue"": ""6000.00"", ""segment"": ""Y""}], ""share_of_total"": {""measure"": ""revenue"", ""shares"": [{""pct_of_total"": 25.0, ""revenue"": 2000.0, ""segment"": ""X""}, {""pct_of_total"": 75.0, ""revenue"": 6000.0, ""segment"": ""Y""}], ""total"": 8000.0}, ""totals"": {""revenue"": {""highest_row"": {""revenue"": 6000.0, ""segment"": ""Y""}, ""lowest_row"": {""revenue"": 2000.0, ""segment"": ""X""}, ""maximum"": 6000.0, ""mean"": 4000.0, ""minimum"": 2000.0, ""n_values"": 2, ""total"": 8000.0}}}","Segment revenue varies between segment X and segment Y.
+Segment X generated a revenue of 2000.00, which corresponds to 25.0 percent of the total.
+Understanding the contribution of each segment helps in resource allocation.
+Segment Y generated a revenue of 6000.00, which corresponds to 75.0 percent of the total.
+Segment Y represents the higher revenue-producing group.
+The analysis only covers two segments with a combined revenue total of 8000.0.",,,
+edb8d3c37bf1,What is the highest retention figure?,"{""change_over_period"": {""retention_pct"": {""absolute_change"": -28.8, ""direction"": ""decrease"", ""from_period"": 1, ""from_value"": 100.0, ""percent_change"": -28.8, ""to_period"": 3, ""to_value"": 71.2}}, ""columns"": [""tenure_month"", ""retention_pct""], ""period_column"": ""tenure_month"", ""question"": ""What is the highest retention figure?"", ""row_count"": 3, ""rows"": [{""retention_pct"": ""100.00"", ""tenure_month"": 1}, {""retention_pct"": ""78.40"", ""tenure_month"": 2}, {""retention_pct"": ""71.20"", ""tenure_month"": 3}], ""totals"": {""retention_pct"": {""maximum"": 100.0, ""mean"": 83.2, ""minimum"": 71.2, ""n_values"": 3, ""total"": 249.6}, ""tenure_month"": {""maximum"": 3.0, ""mean"": 2.0, ""minimum"": 1.0, ""n_values"": 3, ""total"": 6.0}}}","The highest retention percentage achieved is 100.00 percent.
+The maximum retention percentage recorded is 100.00.
+It represents the peak performance level for customer retention in the dataset.
+Data is restricted to the provided tenure months and figures.",,,
+201bb9fca7b6,How did revenue change between these two weeks?,"{""columns"": [""week_no"", ""revenue""], ""rows"": [{""revenue"": ""80000.00"", ""week_no"": 20}, {""revenue"": ""92000.00"", ""week_no"": 21}]}","Revenue data for week 20 and week 21 is now available for review.
+In week 20, the recorded revenue was 80000.00.
+Establishes the baseline performance for the first of the two weeks.
+In week 21, the recorded revenue reached 92000.00.
+Provides the revenue figure for the subsequent week.
+The dataset only contains records for week 20 and week 21.",,,
+d3c0fa4d50ad,What is the retention rate?,"{""columns"": [""retention_pct""], ""question"": ""What is the retention rate?"", ""row_count"": 1, ""rows"": [{""retention_pct"": ""67.4956""}], ""totals"": {""retention_pct"": {""maximum"": 67.5, ""mean"": 67.5, ""minimum"": 67.5, ""n_values"": 1, ""total"": 67.5}}}","The current retention rate stands at 67.4956 percent.
+The retention rate is recorded at 67.4956.
+This metric measures customer loyalty and ongoing engagement with our retail offerings.
+The data represents a single aggregated retention percentage without additional historical context.",,,
+ee9c392166a3,Summarise the campaign effect.,"{""columns"": [""naive_difference"", ""did_estimate"", ""p_value""], ""question"": ""Summarise the campaign effect."", ""row_count"": 1, ""rows"": [{""did_estimate"": ""1.51"", ""naive_difference"": ""6.53"", ""p_value"": ""0.42""}], ""totals"": {""did_estimate"": {""maximum"": 1.51, ""mean"": 1.51, ""minimum"": 1.51, ""n_values"": 1, ""total"": 1.51}, ""naive_difference"": {""maximum"": 6.53, ""mean"": 6.53, ""minimum"": 6.53, ""n_values"": 1, ""total"": 6.53}, ""p_value"": {""maximum"": 0.42, ""mean"": 0.42, ""minimum"": 0.42, ""n_values"": 1, ""total"": 0.42}}}","The campaign effect analysis shows an estimated impact that is not statistically significant.
+The difference-in-differences estimate is 1.51 with a p-value of 0.42, while the naive difference is 6.53.
+Because the p-value is greater than standard thresholds, we cannot conclude the campaign drove a statistically significant change.
+The results rely on a single set of metrics where the p-value of 0.42 indicates high probability of chance occurrence.",,,
+ac446214ac2f,Summarise the revenue trend.,"{""change_over_period"": {""revenue"": {""absolute_change"": -1710.0, ""direction"": ""decrease"", ""from_period"": 1, ""from_value"": 9000.0, ""percent_change"": -19.0, ""to_period"": 3, ""to_value"": 7290.0}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""Summarise the revenue trend."", ""row_count"": 3, ""rows"": [{""revenue"": ""9000.00"", ""week_no"": 1}, {""revenue"": ""8100.00"", ""week_no"": 2}, {""revenue"": ""7290.00"", ""week_no"": 3}], ""totals"": {""revenue"": {""maximum"": 9000.0, ""mean"": 8130.0, ""minimum"": 7290.0, ""n_values"": 3, ""total"": 24390.0}, ""week_no"": {""maximum"": 3.0, ""mean"": 2.0, ""minimum"": 1.0, ""n_values"": 3, ""total"": 6.0}}}","Revenue decreased from week 1 to week 3.
+Revenue moved from 9000.0 at week 1 to 7290.0 at week 3, representing a decrease of 19.0 percent.
+Tracking this decrease helps identify downward revenue trends across the measured weeks.
+Data is limited to the provided weeks.",,,
+67412729ebaa,What is the smallest department share?,"{""columns"": [""department"", ""pct""], ""rows"": [{""department"": ""TOYS"", ""pct"": ""0.08""}, {""department"": ""GROCERY"", ""pct"": ""41.20""}]}","The smallest department share is held by TOYS at 0.08.
+TOYS has a department share of 0.08, which is the smallest value recorded among the departments.
+It indicates the lowest proportional contribution to department share in the dataset.
+The data only contains GROCERY and TOYS departments.",,,
+bd814732ddb7,Summarise the annualised position.,"{""columns"": [""week_no"", ""revenue""], ""rows"": [{""revenue"": ""1000.00"", ""week_no"": 1}]}","The annualised position shows a single recorded week of performance.
+Week 1 recorded a revenue of 1000.00.
+It establishes the baseline operational revenue for the start of the period.
+The dataset contains only one data point, limiting broader trend analysis.",,,
+5cd4613d1fcb,What was the percentage change?,"{""change_over_period"": {""revenue"": {""absolute_change"": 250.0, ""direction"": ""increase"", ""from_period"": 30, ""from_value"": 1250.0, ""percent_change"": 20.0, ""to_period"": 31, ""to_value"": 1500.0}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""What was the percentage change?"", ""row_count"": 2, ""rows"": [{""revenue"": ""1250.00"", ""week_no"": 30}, {""revenue"": ""1500.00"", ""week_no"": 31}], ""totals"": {""revenue"": {""maximum"": 1500.0, ""mean"": 1375.0, ""minimum"": 1250.0, ""n_values"": 2, ""total"": 2750.0}, ""week_no"": {""maximum"": 31.0, ""mean"": 30.5, ""minimum"": 30.0, ""n_values"": 2, ""total"": 61.0}}}","Revenue increased from week 30 to week 31.
+Revenue moved from 1250.0 in week 30 to 1500.0 in week 31, representing a percent change of 20.0.
+Tracking the percent change helps evaluate week-over-week performance.
+Data is limited to week 30 and week 31.",,,
+810b02b6ead9,What is the average basket value?,"{""columns"": [""basket_value""], ""question"": ""What is the average basket value?"", ""row_count"": 1, ""rows"": [{""basket_value"": ""45.634""}], ""totals"": {""basket_value"": {""maximum"": 45.63, ""mean"": 45.63, ""minimum"": 45.63, ""n_values"": 1, ""total"": 45.63}}}","The average basket value is 45.63.
+The mean basket value is 45.63.
+This metric provides a baseline for understanding typical customer spending per transaction.
+The analysis is based on a single value and total count of 1.",,,
+7110c9d7bedd,How concentrated is the household base?,"{""columns"": [""segment"", ""pct_of_panel"", ""pct_of_revenue""], ""question"": ""How concentrated is the household base?"", ""row_count"": 1, ""rows"": [{""pct_of_panel"": ""20.5"", ""pct_of_revenue"": ""45.6"", ""segment"": ""Champions""}], ""totals"": {""pct_of_panel"": {""highest_row"": {""pct_of_panel"": 20.5, ""segment"": ""Champions""}, ""lowest_row"": {""pct_of_panel"": 20.5, ""segment"": ""Champions""}, ""maximum"": 20.5, ""mean"": 20.5, ""minimum"": 20.5, ""n_values"": 1, ""total"": 20.5}, ""pct_of_revenue"": {""highest_row"": {""pct_of_revenue"": 45.6, ""segment"": ""Champions""}, ""lowest_row"": {""pct_of_revenue"": 45.6, ""segment"": ""Champions""}, ""maximum"": 45.6, ""mean"": 45.6, ""minimum"": 45.6, ""n_values"": 1, ""total"": 45.6}}}","The household base shows significant revenue concentration in the Champions segment.
+The Champions segment represents 20.5 percent of the panel and generates 45.6 percent of the revenue.
+A minority of households drives a disproportionately large share of total revenue, highlighting the importance of retaining this key segment.
+The data only includes the Champions segment and does not show metrics for other customer segments.",,,
+17fe7f0d3dd1,What does this say about profitability?,"{""columns"": [""department"", ""revenue""], ""rows"": [{""department"": ""GROCERY"", ""revenue"": ""4100000.00""}]}","The available data provides revenue figures for the grocery department without detailing costs or profitability.
+The GROCERY department generated a revenue of 4100000.00.
+While this shows the top-line sales volume for this department, it is not possible to determine profit margins or net income from revenue alone.
+Profitability cannot be assessed because the dataset only contains revenue and lacks cost data.",,,
+05ab571bf1ca,What proportion of the catalogue reaches 80% of revenue?,"{""columns"": [""products"", ""pct_of_catalogue""], ""rows"": [{""pct_of_catalogue"": ""12.9"", ""products"": 11865}]}","A small fraction of the catalogue generates the majority of revenue.
+The proportion of the catalogue that reaches 80% of revenue is 12.9 percent, comprising 11865 products.
+Focusing inventory and marketing efforts on this specific segment can optimize operational efficiency.
+The data reflects historical performance and may not predict future catalogue contributions.",,,
+73521fbd0e5d,By what percentage did revenue grow?,"{""change_over_period"": {""revenue"": {""absolute_change"": 200.0, ""direction"": ""increase"", ""from_period"": 1, ""from_value"": 800.0, ""percent_change"": 25.0, ""to_period"": 2, ""to_value"": 1000.0}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""By what percentage did revenue grow?"", ""row_count"": 2, ""rows"": [{""revenue"": ""800.00"", ""week_no"": 1}, {""revenue"": ""1000.00"", ""week_no"": 2}], ""totals"": {""revenue"": {""maximum"": 1000.0, ""mean"": 900.0, ""minimum"": 800.0, ""n_values"": 2, ""total"": 1800.0}, ""week_no"": {""maximum"": 2.0, ""mean"": 1.5, ""minimum"": 1.0, ""n_values"": 2, ""total"": 3.0}}}","Revenue grew from week 1 to week 2.
+Revenue increased by 25.0 percent, moving from a value of 800.0 in week 1 to 1000.0 in week 2, representing an absolute change of 200.0.
+Shows positive revenue momentum across the measured periods.
+Data is limited to week 1 and week 2.",,,
+58c40f1ef674,Did the campaign period show growth?,"{""columns"": [""week_no"", ""revenue""], ""rows"": [{""revenue"": ""1200.50"", ""week_no"": 45}, {""revenue"": ""1150.25"", ""week_no"": 46}]}","Revenue figures are available for week 45 and week 46.
+In week 45, the recorded revenue was 1200.50.
+Establishes the performance baseline for the first recorded week.
+In week 46, the recorded revenue was 1150.25.
+Provides the revenue result for the subsequent week.
+The provided data only includes two weeks, so campaign growth cannot be fully evaluated without additional period context.",,,
+6e828a82b413,What is the retention rate?,"{""columns"": [""retention_pct""], ""rows"": [{""retention_pct"": ""67.4956""}]}","The overall retention rate is recorded at 67.4956 percent.
+The retention rate stands at 67.4956 percent.
+This metric indicates the baseline proportion of customers or users maintained over the measurement period.
+The data represents a single retention rate figure without temporal or segment breakdowns.",,,
+21ace9063cd8,How concentrated is the household base?,"{""columns"": [""segment"", ""pct_of_panel"", ""pct_of_revenue""], ""rows"": [{""pct_of_panel"": ""20.5"", ""pct_of_revenue"": ""45.6"", ""segment"": ""Champions""}]}","Champions represent a minority of the household base while driving a larger share of revenue.
+Champions account for 20.5 percent of the panel and 45.6 percent of revenue.
+This indicates that revenue generation is heavily concentrated within this top household segment.
+Data is limited to the Champions segment provided.",,,
+181e06cc78af,What will revenue be next week?,"{""change_over_period"": {""revenue"": {""absolute_change"": 2000.0, ""direction"": ""increase"", ""from_period"": 50, ""from_value"": 84000.0, ""percent_change"": 2.38, ""to_period"": 51, ""to_value"": 86000.0}}, ""columns"": [""week_no"", ""revenue""], ""period_column"": ""week_no"", ""question"": ""What will revenue be next week?"", ""row_count"": 2, ""rows"": [{""revenue"": ""84000.00"", ""week_no"": 50}, {""revenue"": ""86000.00"", ""week_no"": 51}], ""totals"": {""revenue"": {""maximum"": 86000.0, ""mean"": 85000.0, ""minimum"": 84000.0, ""n_values"": 2, ""total"": 170000.0}, ""week_no"": {""maximum"": 51.0, ""mean"": 50.5, ""minimum"": 50.0, ""n_values"": 2, ""total"": 101.0}}}","Revenue is tracked across two periods, moving from week 50 to week 51.
+Revenue was 84000.00 in week 50 and increased by 2000.0 to reach 86000.00 in week 51.
+Tracking the trajectory of revenue between consecutive weeks helps monitor recent sales momentum.
+The data provided covers only two periods and does not contain a forecast for future weeks.",,,
+efae08f5f0e0,Give an overview of these segments.,"{""columns"": [""segment"", ""households"", ""revenue""], ""rows"": [{""households"": 512, ""revenue"": ""3900000.00"", ""segment"": ""Champions""}, {""households"": 300, ""revenue"": ""1200000.00"", ""segment"": ""Loyal""}]}","Overview of customer segments showing household counts and revenue generation.
+The Champions segment comprises 512 households generating 3900000.00 in revenue.
+Identifies the primary revenue-driving customer group.
+The Loyal segment consists of 300 households contributing 1200000.00 in revenue.
+Highlights the contribution of the second customer group.
+The data only covers two segments.
+No time period is specified for the revenue.",,,
+1a23526731e1,What is the p-value?,"{""columns"": [""p_value""], ""rows"": [{""p_value"": ""0.0071""}]}","The analysis yielded a p-value of 0.0071.
+The resulting p-value is 0.0071.
+This metric indicates the statistical significance of the findings from the data.
+The data only provides the p-value without additional context.",,,
+2d83609c53f6,What is the display coverage rate?,"{""columns"": [""display_pct""], ""question"": ""What is the display coverage rate?"", ""row_count"": 1, ""rows"": [{""display_pct"": ""8.7""}], ""totals"": {""display_pct"": {""maximum"": 8.7, ""mean"": 8.7, ""minimum"": 8.7, ""n_values"": 1, ""total"": 8.7}}}","The display coverage rate stands at 8.7 percent.
+The overall display coverage rate recorded is 8.7.
+This metric measures the proportion of locations or products utilizing displays, indicating current in-store visibility.
+The data is based on a single measured value.",,,
+63d5dc4233da,Describe revenue concentration.,"{""columns"": [""top_1pct_share"", ""products""], ""question"": ""Describe revenue concentration."", ""row_count"": 1, ""rows"": [{""products"": 92353, ""top_1pct_share"": ""37.7""}], ""totals"": {""products"": {""maximum"": 92353.0, ""mean"": 92353.0, ""minimum"": 92353.0, ""n_values"": 1, ""total"": 92353.0}, ""top_1pct_share"": {""maximum"": 37.7, ""mean"": 37.7, ""minimum"": 37.7, ""n_values"": 1, ""total"": 37.7}}}","Revenue concentration shows the top one percent share across the product catalog.
+Across 92353 products, the top 1pct share accounts for 37.7 of revenue concentration.
+Understanding this concentration helps manage portfolio risk and merchandising focus.
+The data represents a single summary row for the catalog.",,,

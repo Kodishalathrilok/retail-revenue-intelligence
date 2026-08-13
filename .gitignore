@@ -45,3 +45,14 @@ desktop.ini
 frontend/node_modules/
 frontend/.next/
 frontend/next-env.d.ts
+
+# Adjudication artefacts. The *.csv rule above exists for the raw dunnhumby
+# data; these are evidence and are tracked deliberately.
+!evals/narration/adjudication_worksheet.csv
+!evals/narration/adjudication_worksheet_human.csv
+!evals/narration/adjudication_judge.csv
+
+# The KEY is NOT tracked. It maps opaque row ids back to arm and case, which is
+# the whole thing the worksheet is blinded against -- committing it alongside
+# the worksheet would undo the blinding for anyone re-running the audit.
+evals/narration/adjudication_key.csv
