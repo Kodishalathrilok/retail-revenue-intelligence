@@ -86,6 +86,8 @@ class ExecutiveOverview(BaseModel):
     avg_basket_value: float
     total_units: int
     weeks_covered: int
+    # Set only on the published tier, where the date filter cannot be applied.
+    window_basis: str | None = None
     meta: Meta = Meta()
 
 

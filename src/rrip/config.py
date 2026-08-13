@@ -60,6 +60,21 @@ class Settings(BaseSettings):
     api_host: str = Field(default="127.0.0.1", alias="RRIP_API_HOST")
     api_port: int = Field(default=8010, alias="RRIP_API_PORT")
 
+    # Which data tier the API reads.
+    #
+    #   local     -- the full star schema (fact_transactions, fact_causal, dims)
+    #   published -- the pub_* aggregate tables only
+    #
+    # These are not interchangeable. The published tier has no fact tables at
+    # all, so an endpoint written against facts returns 500 there. Every
+    # endpoint therefore has two query variants and picks by tier -- see
+    # rrip.api.queries.
+    tier: str = Field(default="local", alias="RRIP_TIER")
+
+    @property
+    def is_published(self) -> bool:
+        return self.tier.lower() == "published"
+
     @property
     def raw_dir(self) -> Path:
         """Absolute path to the dunnhumby CSVs.

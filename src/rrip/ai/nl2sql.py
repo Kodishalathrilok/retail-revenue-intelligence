@@ -96,6 +96,68 @@ RULES
 Return ONLY the SQL. No markdown fences, no commentary."""
 
 
+PUBLISHED_SCHEMA_PROMPT = """\
+You write PostgreSQL SELECT queries against a PRE-AGGREGATED retail dataset.
+
+IMPORTANT: there are no transaction-level or promotion-level fact tables here.
+Every table below already holds a computed result. You cannot answer questions
+about individual baskets, individual households' purchases, or product-level
+promotion exposure. If a question needs that granularity, return a SELECT that
+explains the limitation, for example:
+    SELECT 'This deployment exposes aggregate tables only; transaction-level
+    data is not available.' AS message;
+
+TABLES
+  pub_weekly_revenue(week_no smallint, start_date date, is_partial_week bool,
+      revenue numeric, baskets int, households int,
+      cumulative_revenue numeric, rolling_7wk_avg numeric)   -- 102 rows
+  pub_weekly_revenue_by_dept(week_no, department text, revenue numeric,
+      baskets int, households int)
+  pub_rfm_segments(segment text, households int, pct_of_panel numeric,
+      avg_recency_days numeric, avg_baskets numeric, avg_lifetime_value numeric,
+      segment_revenue numeric, pct_of_revenue numeric)       -- 7 rows
+  pub_retention_tenure(segment text, tenure_month int, cohort_size int,
+      active_households int, retention_pct numeric)          -- 72 rows
+  pub_pareto_products(revenue_rank int, product_id int, commodity_desc text,
+      department text, revenue numeric, cumulative_pct numeric)  -- top 5,000
+  pub_commodity_affinity(commodity_a text, commodity_b text, pair_baskets int,
+      support numeric, lift numeric)
+  pub_reorder_by_department(department text, products int,
+      avg_household_reorder_rate numeric, avg_line_reorder_rate numeric)
+  pub_promo_exposure(week_no smallint, department text, promo_rows bigint,
+      on_display bigint, in_mailer bigint, display_pct numeric)
+  pub_anomalies(week_no, start_date, revenue, z_score, mean_revenue, is_partial_week)
+  pub_headline(metric text, value text, context text)
+  pub_causal_results(campaign_id int, treated_n, control_n int,
+      contaminated_pct, naive_difference, did_estimate, did_pvalue numeric, ...)
+  pub_dim_product(product_id int, department, brand, commodity_desc,
+      sub_commodity_desc text)                               -- 92,353 rows
+  pub_dim_date, pub_dim_week, pub_dim_store, pub_dim_household, pub_dim_campaign
+  pub_manifest(table_name text, rows bigint, bytes bigint, published_at timestamptz)
+
+RULES
+  - Return ONE SELECT statement. No semicolon-separated statements. No DDL or DML.
+  - Always add a LIMIT unless the query aggregates to few rows.
+  - Weekday labels are a modelling convention, not source data. Do not answer
+    day-of-week questions.
+  - Weeks 1 and 102 are partial (5 and 6 days) and not comparable to full weeks.
+
+Return ONLY the SQL. No markdown fences, no commentary."""
+
+
+def schema_prompt() -> str:
+    """Pick the schema description matching the configured tier.
+
+    The published tier genuinely has a different schema -- not a subset of the
+    same tables, a different set. Handing the model the local schema there would
+    produce SQL that references tables which do not exist, and every failure
+    would look like a model error rather than a configuration one.
+    """
+    from rrip.config import settings
+
+    return PUBLISHED_SCHEMA_PROMPT if settings.is_published else SCHEMA_PROMPT
+
+
 @dataclass
 class Stage:
     stage: str
@@ -264,7 +326,7 @@ async def answer(question: str, provider: LLMProvider,
             "Return corrected SQL only.")
 
         try:
-            resp = await provider.complete(prompt, system=SCHEMA_PROMPT)
+            resp = await provider.complete(prompt, system=schema_prompt())
         except Exception as exc:
             result.failure_reason = f"provider error: {type(exc).__name__}: {exc}"
             break

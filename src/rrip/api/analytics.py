@@ -12,6 +12,7 @@ from datetime import date
 
 from fastapi import APIRouter, HTTPException, Query
 
+from rrip.api import queries as Q
 from rrip.api.db import fetch, fetch_one, resolve_week_range
 from rrip.api.models import (
     PANEL_END,
@@ -21,6 +22,7 @@ from rrip.api.models import (
     Meta,
     Page,
 )
+from rrip.config import settings
 
 router = APIRouter(prefix="/api/v1", tags=["analytics"])
 
@@ -32,26 +34,22 @@ async def overview(
     department: str | None = Query(None),
 ) -> ExecutiveOverview:
     row = await fetch_one(
-        """
-        SELECT round(sum(ft.sales_value), 2)            AS total_revenue,
-               count(DISTINCT ft.basket_id)             AS total_baskets,
-               count(DISTINCT ft.household_key)         AS total_households,
-               round(sum(ft.sales_value)
-                     / nullif(count(DISTINCT ft.basket_id), 0), 2) AS avg_basket_value,
-               coalesce(sum(ft.quantity) FILTER (WHERE NOT ft.is_weighted_item
-                                             AND NOT ft.is_return), 0) AS total_units,
-               count(DISTINCT ft.week_no)               AS weeks_covered
-        FROM fact_transactions ft
-        JOIN dim_product p ON p.product_id = ft.product_id
-        WHERE ft.date_key BETWEEN %(date_from)s AND %(date_to)s
-          AND (%(department)s::text IS NULL OR p.department = %(department)s::text)
-        """,
+        Q.pick(Q.OVERVIEW_LOCAL, Q.OVERVIEW_PUBLISHED),
         {"date_from": date_from, "date_to": date_to, "department": department},
         timeout_ms=30_000)
 
     if not row or row["total_revenue"] is None:
         raise HTTPException(404, "no data in the requested window")
-    return ExecutiveOverview(**{k: v for k, v in row.items()}, meta=Meta())
+
+    payload = dict(row)
+    if settings.is_published:
+        # Panel-wide on this tier -- see the note in queries.OVERVIEW_PUBLISHED.
+        # Stated in the response rather than silently applied.
+        payload["window_basis"] = (
+            "Published tier: totals cover the whole 711-day panel. A distinct "
+            "household count cannot be reconstructed from weekly aggregates, so "
+            "the date filter is not applied to this endpoint here.")
+    return ExecutiveOverview(**payload, meta=Meta())
 
 
 @router.get("/revenue/weekly")
@@ -67,28 +65,7 @@ async def revenue_weekly(
     width and misplaces turning points.
     """
     rows = await fetch(
-        """
-        WITH weekly AS (
-            SELECT w.week_no, w.start_date, w.is_partial_week,
-                   round(sum(ft.sales_value), 2)    AS revenue,
-                   count(DISTINCT ft.basket_id)     AS baskets,
-                   count(DISTINCT ft.household_key) AS households
-            FROM fact_transactions ft
-            JOIN dim_week w    ON w.week_no    = ft.week_no
-            JOIN dim_product p ON p.product_id = ft.product_id
-            WHERE ft.date_key BETWEEN %(date_from)s AND %(date_to)s
-              AND (%(department)s::text IS NULL OR p.department = %(department)s::text)
-            GROUP BY w.week_no, w.start_date, w.is_partial_week
-        )
-        SELECT week_no, start_date, is_partial_week, revenue, baskets, households,
-               sum(revenue) OVER (ORDER BY week_no
-                                  ROWS BETWEEN UNBOUNDED PRECEDING
-                                           AND CURRENT ROW) AS cumulative_revenue,
-               round(avg(revenue) OVER (ORDER BY week_no
-                                        ROWS BETWEEN 3 PRECEDING
-                                                 AND 3 FOLLOWING), 2) AS rolling_7wk_avg
-        FROM weekly ORDER BY week_no
-        """,
+        Q.pick(Q.WEEKLY_LOCAL, Q.WEEKLY_PUBLISHED),
         {"date_from": date_from, "date_to": date_to, "department": department},
         timeout_ms=30_000)
     return {"items": rows, "meta": Meta().model_dump()}
@@ -98,42 +75,7 @@ async def revenue_weekly(
 async def rfm_segments() -> dict:
     """RFM segmentation. Recency is measured against panel end, not today."""
     rows = await fetch(
-        """
-        WITH bounds AS (SELECT max(day_number) AS last_day FROM fact_transactions),
-        household_metrics AS (
-            SELECT household_key,
-                   (SELECT last_day FROM bounds) - max(day_number) AS recency_days,
-                   count(DISTINCT basket_id)                       AS frequency_baskets,
-                   round(sum(sales_value), 2)                      AS monetary_value
-            FROM fact_transactions GROUP BY household_key
-        ),
-        scored AS (
-            SELECT *, ntile(5) OVER (ORDER BY recency_days DESC) AS r_score,
-                      ntile(5) OVER (ORDER BY frequency_baskets) AS f_score,
-                      ntile(5) OVER (ORDER BY monetary_value)    AS m_score
-            FROM household_metrics
-        ),
-        segmented AS (
-            SELECT *, CASE
-                WHEN r_score >= 4 AND f_score >= 4 AND m_score >= 4 THEN 'Champions'
-                WHEN r_score >= 3 AND f_score >= 3                  THEN 'Loyal'
-                WHEN r_score >= 4 AND f_score <= 2                  THEN 'New / Promising'
-                WHEN r_score <= 2 AND f_score >= 4 AND m_score >= 4 THEN 'At Risk - high value'
-                WHEN r_score <= 2 AND f_score >= 3                  THEN 'At Risk'
-                WHEN r_score <= 2 AND f_score <= 2                  THEN 'Lapsed'
-                ELSE 'Needs Attention' END AS segment
-            FROM scored
-        )
-        SELECT segment, count(*) AS households,
-               round(100.0 * count(*) / sum(count(*)) OVER (), 1) AS pct_of_panel,
-               round(avg(recency_days))      AS avg_recency_days,
-               round(avg(frequency_baskets)) AS avg_baskets,
-               round(avg(monetary_value), 2) AS avg_lifetime_value,
-               round(sum(monetary_value), 2) AS segment_revenue,
-               round(100.0 * sum(monetary_value)
-                     / sum(sum(monetary_value)) OVER (), 1) AS pct_of_revenue
-        FROM segmented GROUP BY segment ORDER BY segment_revenue DESC
-        """, timeout_ms=30_000)
+        Q.pick(Q.RFM_LOCAL, Q.RFM_PUBLISHED), timeout_ms=30_000)
     return {"items": rows, "meta": Meta().model_dump()}
 
 
@@ -147,42 +89,7 @@ async def retention_tenure() -> dict:
     that basis so a chart cannot render the numbers without it.
     """
     rows = await fetch(
-        """
-        WITH first_purchase AS (
-            SELECT household_key, min(date_key) AS first_date,
-                   min(day_number) AS first_day
-            FROM fact_transactions GROUP BY household_key
-        ),
-        first_basket AS (
-            SELECT fp.household_key, fp.first_day,
-                   sum(ft.sales_value) AS first_basket_value
-            FROM first_purchase fp
-            JOIN fact_transactions ft ON ft.household_key = fp.household_key
-                                     AND ft.date_key      = fp.first_date
-            GROUP BY fp.household_key, fp.first_day
-        ),
-        cohort AS (
-            SELECT household_key, first_day,
-                   ntile(3) OVER (ORDER BY first_basket_value) AS spend_tercile
-            FROM first_basket
-        ),
-        activity AS (
-            SELECT c.spend_tercile, (ft.day_number - c.first_day) / 30 AS tenure_month,
-                   count(DISTINCT ft.household_key) AS active_households
-            FROM fact_transactions ft
-            JOIN cohort c ON c.household_key = ft.household_key
-            WHERE (ft.day_number - c.first_day) / 30 <= 23
-            GROUP BY 1, 2
-        ),
-        cohort_size AS (SELECT spend_tercile, count(*) AS households FROM cohort GROUP BY 1)
-        SELECT CASE a.spend_tercile WHEN 1 THEN 'Smallest first basket'
-                                    WHEN 2 THEN 'Middle'
-                                    ELSE 'Largest first basket' END AS segment,
-               a.tenure_month, s.households AS cohort_size, a.active_households,
-               round(100.0 * a.active_households / s.households, 1) AS retention_pct
-        FROM activity a JOIN cohort_size s ON s.spend_tercile = a.spend_tercile
-        ORDER BY a.spend_tercile, a.tenure_month
-        """, timeout_ms=30_000)
+        Q.pick(Q.RETENTION_LOCAL, Q.RETENTION_PUBLISHED), timeout_ms=30_000)
     return {"items": rows,
             "basis": "relative tenure, not calendar cohorts (panel data)",
             "meta": Meta().model_dump()}
@@ -203,18 +110,7 @@ async def promo_exposure(
     """
     week_from, week_to = await resolve_week_range(date_from, date_to)
     rows = await fetch(
-        """
-        SELECT p.department,
-               count(*)                                  AS promo_rows,
-               count(*) FILTER (WHERE fc.display <> '0') AS on_display,
-               count(*) FILTER (WHERE fc.mailer  <> '0') AS in_mailer,
-               round(100.0 * count(*) FILTER (WHERE fc.display <> '0')
-                     / nullif(count(*), 0), 2)           AS display_pct
-        FROM fact_causal fc
-        JOIN dim_product p ON p.product_id = fc.product_id
-        WHERE fc.week_no BETWEEN %(week_from)s AND %(week_to)s
-        GROUP BY p.department ORDER BY promo_rows DESC
-        """,
+        Q.pick(Q.PROMO_LOCAL, Q.PROMO_PUBLISHED),
         {"week_from": week_from, "week_to": week_to},
         timeout_ms=60_000)
     return {"items": rows,
@@ -241,31 +137,7 @@ async def products_pareto(
 
     after_rank = int(cur.last_values[0]) if cur else 0
     rows = await fetch(
-        """
-        WITH product_revenue AS (
-            SELECT ft.product_id, p.commodity_desc, p.department,
-                   round(sum(ft.sales_value), 2) AS revenue
-            FROM fact_transactions ft
-            JOIN dim_product p ON p.product_id = ft.product_id
-            WHERE ft.sales_value > 0
-            GROUP BY ft.product_id, p.commodity_desc, p.department
-        ),
-        ranked AS (
-            SELECT *, row_number() OVER (ORDER BY revenue DESC) AS revenue_rank,
-                   sum(revenue) OVER (ORDER BY revenue DESC
-                                      ROWS BETWEEN UNBOUNDED PRECEDING
-                                               AND CURRENT ROW) AS cumulative_revenue,
-                   sum(revenue) OVER () AS total_revenue
-            FROM product_revenue
-        )
-        SELECT product_id, commodity_desc, department, revenue, revenue_rank,
-               cumulative_revenue,
-               round(100.0 * cumulative_revenue / total_revenue, 4) AS cumulative_pct
-        FROM ranked
-        WHERE revenue_rank > %(after_rank)s
-        ORDER BY revenue_rank
-        LIMIT %(limit)s
-        """,
+        Q.pick(Q.PARETO_LOCAL, Q.PARETO_PUBLISHED),
         {"after_rank": after_rank, "limit": limit + 1},
         timeout_ms=60_000)
 
@@ -278,7 +150,5 @@ async def products_pareto(
 
 @router.get("/departments")
 async def departments() -> dict:
-    rows = await fetch(
-        """SELECT department, count(*) AS products FROM dim_product
-           WHERE department IS NOT NULL GROUP BY department ORDER BY department""")
+    rows = await fetch(Q.pick(Q.DEPARTMENTS_LOCAL, Q.DEPARTMENTS_PUBLISHED))
     return {"items": rows}

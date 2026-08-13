@@ -198,6 +198,8 @@ def run(dsn: str | None = None, local_only: bool = False) -> int:
     with connect() as conn:
         console.print("building aggregates from the local star schema...\n")
         published = build_local(conn)
+        console.print("\ncomputing causal results (statsmodels, not SQL)...\n")
+        published += build_causal(conn)
         _manifest(conn, published)
     total = report(published)
 
@@ -209,3 +211,90 @@ def run(dsn: str | None = None, local_only: bool = False) -> int:
     console.print("\npushing to target...\n")
     push(dsn, published)
     return total
+
+
+def build_causal(conn: psycopg.Connection) -> list[Published]:
+    """Compute and store the causal results.
+
+    These are the one part of the tier that SQL cannot build: the estimates come
+    from statsmodels. They are PRECOMPUTED by design -- the hosted tier has no
+    fact table to re-estimate from, which is stated in the UI rather than left
+    for a user to discover.
+    """
+    import json
+
+    from rrip.ai.causal import (
+        build_panel,
+        check_parallel_trends,
+        confidence_verdict,
+        estimate_did,
+        household_attributes,
+        naive_difference,
+    )
+    from rrip.publish.tables import CAUSAL_CAMPAIGNS, CAUSAL_DDL, CONTAMINATION
+
+    t0 = time.perf_counter()
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS pub_causal_results")
+        cur.execute("DROP TABLE IF EXISTS pub_causal_pretrend")
+        for ddl in CAUSAL_DDL:
+            cur.execute(ddl)
+    conn.commit()
+
+    confounders = ["pre_spend", "pre_baskets", "coupon_offers", "has_demographics"]
+    pre_rows = 0
+
+    for cid in CAUSAL_CAMPAIGNS:
+        df = build_panel(conn, cid)
+        if df.empty:
+            console.print(f"  [yellow]campaign {cid}: no panel data, skipped")
+            continue
+        attrs = household_attributes(conn, cid)
+        pt = check_parallel_trends(df)
+        res = estimate_did(df)
+        adj = estimate_did(df, confounders, attrs)
+        treated_n = int(df[df.treated == 1].household_key.nunique())
+        control_n = int(df[df.treated == 0].household_key.nunique())
+        contam = CONTAMINATION.get(cid, 0.0)
+        verdict, warnings = confidence_verdict(pt, contam, treated_n, res)
+
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO pub_causal_results VALUES
+                (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (cid, treated_n, control_n, contam,
+                 round(naive_difference(df), 4),
+                 round(res["did_estimate"], 4), round(res["did_stderr"], 4),
+                 round(res["did_pvalue"], 6), round(res["ci_low"], 4),
+                 round(res["ci_high"], 4),
+                 (round(adj["adjusted_estimate"], 4)
+                  if adj.get("adjusted_estimate") is not None else None),
+                 (round(adj["adjusted_stderr"], 4)
+                  if adj.get("adjusted_stderr") is not None else None),
+                 ",".join(adj.get("confounders_used", [])),
+                 pt.passed, round(pt.treated_slope, 4), round(pt.control_slope, 4),
+                 round(pt.interaction_pvalue, 6), pt.pre_weeks, pt.verdict,
+                 verdict, json.dumps(warnings)))
+
+            pre = df[df.post == 0].groupby(
+                ["treated", "week_no"])["spend"].mean().reset_index()
+            for r in pre.itertuples():
+                cur.execute(
+                    "INSERT INTO pub_causal_pretrend VALUES (%s,%s,%s,%s) "
+                    "ON CONFLICT DO NOTHING",
+                    (cid, "treated" if r.treated == 1 else "control",
+                     int(r.week_no), round(float(r.spend), 3)))
+                pre_rows += 1
+        conn.commit()
+        console.print(f"  campaign {cid:<3} did={res['did_estimate']:+8.4f}  "
+                      f"naive={naive_difference(df):+8.4f}  {verdict}")
+
+    dt = (time.perf_counter() - t0) * 1000
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM pub_causal_results")
+        n = int(cur.fetchone()[0])
+    return [
+        Published("pub_causal_results", n, _size(conn, "pub_causal_results"), dt),
+        Published("pub_causal_pretrend", pre_rows,
+                  _size(conn, "pub_causal_pretrend"), 0.0),
+    ]

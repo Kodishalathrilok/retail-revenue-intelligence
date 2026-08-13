@@ -88,10 +88,9 @@ async def resolve_week_range(date_from: Any, date_to: Any) -> tuple[int, int]:
     window, 2.09x faster). Inlining this lookup back into the query would
     silently undo that.
     """
+    from rrip.api import queries as Q
+
     row = await fetch_one(
-        """SELECT coalesce(min(week_no), 1)   AS week_from,
-                  coalesce(max(week_no), 102) AS week_to
-           FROM dim_week
-           WHERE end_date >= %(date_from)s AND start_date <= %(date_to)s""",
+        Q.pick(Q.WEEK_RANGE_LOCAL, Q.WEEK_RANGE_PUBLISHED),
         {"date_from": date_from, "date_to": date_to})
     return int(row["week_from"]), int(row["week_to"])

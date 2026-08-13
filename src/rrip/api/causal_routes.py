@@ -16,6 +16,7 @@ from rrip.ai.causal import (
     propose_confounders,
 )
 from rrip.ai.provider import get_provider
+from rrip.config import settings
 from rrip.db.connection import connect
 
 router = APIRouter(prefix="/api/v1/causal", tags=["causal"])
@@ -25,6 +26,18 @@ router = APIRouter(prefix="/api/v1/causal", tags=["causal"])
 CONTAMINATION = {26: 6.6, 8: 59.9, 18: 90.8}
 
 DEFAULT_CONFOUNDERS = ["pre_spend", "pre_baskets", "coupon_offers", "has_demographics"]
+
+INTERPRETATION = {
+    "naive": ("Before/after change for the treated group alone. This is what a "
+              "dashboard reports when nobody asks about a control group. It "
+              "absorbs every seasonal and secular trend."),
+    "did": ("Difference-in-differences: the treated change minus the control "
+            "change over the same period. Valid only if parallel trends holds."),
+    "adjusted": ("DiD with household covariates, including coupon_offers -- "
+                 "coupons targeted at products a household already bought. That "
+                 "is selection on past outcomes, the specific confounder that "
+                 "breaks DiD."),
+}
 
 
 @router.get("/campaigns")
@@ -43,10 +56,75 @@ async def campaigns() -> dict:
     ]}
 
 
+async def _published_analysis(campaign_id: int) -> dict:
+    """Read a precomputed causal result from the published tier.
+
+    The hosted tier has no fact table, so it cannot re-estimate. It serves the
+    estimate, the verdict and the pre-trend series that local computed at
+    publish time -- and says so, rather than presenting a stored number as a
+    live one.
+    """
+    import json
+
+    from rrip.api.db import fetch, fetch_one
+
+    row = await fetch_one(
+        "SELECT * FROM pub_causal_results WHERE campaign_id = %(cid)s",
+        {"cid": campaign_id})
+    if not row:
+        raise HTTPException(404, f"no published causal result for campaign {campaign_id}")
+
+    series = await fetch(
+        """SELECT arm, week_no, mean_spend FROM pub_causal_pretrend
+           WHERE campaign_id = %(cid)s ORDER BY arm, week_no""", {"cid": campaign_id})
+
+    def arm(name: str) -> list[dict]:
+        return [{"week_no": int(r["week_no"]), "mean_spend": float(r["mean_spend"])}
+                for r in series if r["arm"] == name]
+
+    try:
+        warnings = json.loads(row["warnings"] or "[]")
+    except (TypeError, ValueError):
+        warnings = []
+
+    return {
+        "campaign_id": row["campaign_id"],
+        "treated_n": row["treated_n"], "control_n": row["control_n"],
+        "contaminated_pct": float(row["contaminated_pct"]),
+        "naive_difference": float(row["naive_difference"]),
+        "did_estimate": float(row["did_estimate"]),
+        "did_stderr": float(row["did_stderr"]),
+        "did_pvalue": float(row["did_pvalue"]),
+        "ci_low": float(row["ci_low"]), "ci_high": float(row["ci_high"]),
+        "adjusted_estimate": (float(row["adjusted_estimate"])
+                              if row["adjusted_estimate"] is not None else None),
+        "adjusted_stderr": (float(row["adjusted_stderr"])
+                            if row["adjusted_stderr"] is not None else None),
+        "confounders_used": [c for c in (row["confounders_used"] or "").split(",") if c],
+        "parallel_trends": {
+            "passed": row["pt_passed"],
+            "treated_slope": float(row["pt_treated_slope"]),
+            "control_slope": float(row["pt_control_slope"]),
+            "interaction_pvalue": float(row["pt_interaction_pvalue"]),
+            "pre_weeks": row["pt_pre_weeks"],
+            "verdict": row["pt_verdict"],
+        },
+        "pre_period_series": {"treated": arm("treated"), "control": arm("control")},
+        "confidence": row["confidence"],
+        "warnings": warnings,
+        "proposed_confounders": [],
+        "precomputed": True,
+        "interpretation": INTERPRETATION,
+    }
+
+
 @router.get("/analysis/{campaign_id}")
 async def analysis(campaign_id: int,
                    adjust: bool = Query(True),
                    propose: bool = Query(False)) -> dict:
+    if settings.is_published:
+        return await _published_analysis(campaign_id)
+
     def _compute():
         """Blocking work: psycopg sync + statsmodels OLS on a 36k-row panel.
 
@@ -123,18 +201,8 @@ async def analysis(campaign_id: int,
         "confidence": verdict,
         "warnings": warnings,
         "proposed_confounders": proposed,
-        "interpretation": {
-            "naive": ("Before/after change for the treated group alone. This is "
-                      "what a dashboard reports when nobody asks about a control "
-                      "group. It absorbs every seasonal and secular trend."),
-            "did": ("Difference-in-differences: the treated change minus the "
-                    "control change over the same period. Valid only if parallel "
-                    "trends holds."),
-            "adjusted": ("DiD with household covariates, including coupon_offers "
-                         "-- coupons targeted at products a household already "
-                         "bought. That is selection on past outcomes, the "
-                         "specific confounder that breaks DiD."),
-        },
+        "precomputed": False,
+        "interpretation": INTERPRETATION,
     }
 
 

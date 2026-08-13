@@ -51,6 +51,22 @@ app.include_router(causal_routes.router)
 
 @app.get("/health")
 async def health() -> dict:
+    """Health check that works on BOTH tiers.
+
+    It previously counted fact_transactions, which does not exist on the
+    published tier -- so the health endpoint itself would have been the first
+    thing to 500 in production.
+    """
     from rrip.api.db import fetch_one
+    from rrip.config import settings
+
+    if settings.is_published:
+        row = await fetch_one(
+            "SELECT count(*) AS n, max(published_at) AS published_at FROM pub_manifest")
+        return {"status": "ok", "tier": "published",
+                "published_tables": row["n"] if row else 0,
+                "published_at": row["published_at"] if row else None}
+
     row = await fetch_one("SELECT count(*) AS n FROM fact_transactions")
-    return {"status": "ok", "fact_transactions_rows": row["n"] if row else 0}
+    return {"status": "ok", "tier": "local",
+            "fact_transactions_rows": row["n"] if row else 0}

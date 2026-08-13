@@ -59,6 +59,33 @@ TABLES: list[PubTable] = [
         "department drill-down without shipping the fact table"),
 
     PubTable(
+        "pub_overview_totals",
+        """CREATE TABLE pub_overview_totals (
+               department text PRIMARY KEY,
+               total_revenue numeric(16,2), total_baskets bigint,
+               total_households int, avg_basket_value numeric(12,2),
+               total_units bigint, weeks_covered int)""",
+        """SELECT CASE WHEN GROUPING(p.department) = 1 THEN '(all)'
+                       ELSE coalesce(p.department, '(unknown)') END AS department,
+                  round(sum(ft.sales_value), 2),
+                  count(DISTINCT ft.basket_id),
+                  count(DISTINCT ft.household_key),
+                  round(sum(ft.sales_value)
+                        / nullif(count(DISTINCT ft.basket_id), 0), 2),
+                  coalesce(sum(ft.quantity) FILTER (
+                      WHERE NOT ft.is_weighted_item AND NOT ft.is_return), 0),
+                  count(DISTINCT ft.week_no)
+           FROM fact_transactions ft
+           JOIN dim_product p ON p.product_id = ft.product_id
+           GROUP BY GROUPING SETS ((p.department), ())""",
+        "COUNT(DISTINCT household) cannot be derived from weekly aggregates -- "
+        "summing double-counts and max() undercounts, so it is computed once "
+        "here. GROUPING SETS gives the per-department rows and the (all) row in "
+        "one pass, and GROUPING() distinguishes the grand-total row from the "
+        "row for products whose department is genuinely NULL -- coalesce alone "
+        "collapses both to the same key and violates the primary key."),
+
+    PubTable(
         "pub_rfm_segments",
         """CREATE TABLE pub_rfm_segments (
                segment text PRIMARY KEY, households int, pct_of_panel numeric(5,1),
@@ -233,3 +260,36 @@ DIMENSIONS = ["dim_date", "dim_week", "dim_store", "dim_household", "dim_campaig
 DIM_PRODUCT_SELECT = """
     SELECT product_id, department, brand, commodity_desc, sub_commodity_desc
     FROM dim_product"""
+
+
+# ---------------------------------------------------------------------------
+# Causal results.
+#
+# These cannot be built by SQL alone -- the estimates come from statsmodels --
+# so the publisher computes them in Python and inserts the rows. They are
+# PRECOMPUTED by design: the hosted tier shows the estimate, the verdict and the
+# pre-trend plot, but cannot re-run an estimation it has no fact table for.
+# ---------------------------------------------------------------------------
+
+CAUSAL_DDL = [
+    """CREATE TABLE pub_causal_results (
+           campaign_id int PRIMARY KEY,
+           treated_n int, control_n int, contaminated_pct numeric(5,1),
+           naive_difference numeric(12,4),
+           did_estimate numeric(12,4), did_stderr numeric(12,4),
+           did_pvalue numeric(12,6), ci_low numeric(12,4), ci_high numeric(12,4),
+           adjusted_estimate numeric(12,4), adjusted_stderr numeric(12,4),
+           confounders_used text,
+           pt_passed boolean, pt_treated_slope numeric(12,4),
+           pt_control_slope numeric(12,4), pt_interaction_pvalue numeric(12,6),
+           pt_pre_weeks int, pt_verdict text,
+           confidence text, warnings text)""",
+    """CREATE TABLE pub_causal_pretrend (
+           campaign_id int, arm text, week_no smallint, mean_spend numeric(12,3),
+           PRIMARY KEY (campaign_id, arm, week_no))""",
+]
+
+# Campaign 26 is the cleanest usable campaign; 8 is the large-sample
+# alternative; 18 is retained deliberately as the contaminated counter-example.
+CAUSAL_CAMPAIGNS = [26, 8, 18]
+CONTAMINATION = {26: 6.6, 8: 59.9, 18: 90.8}

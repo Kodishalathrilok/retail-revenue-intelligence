@@ -111,26 +111,10 @@ async def anomalies(z_threshold: float = 2.5) -> dict:
     The model does not detect these and does not score them. It receives the
     finished list.
     """
+    from rrip.api import queries as Q
+
     rows = await fetch(
-        """
-        WITH weekly AS (
-            SELECT w.week_no, w.start_date, w.is_partial_week,
-                   round(sum(ft.sales_value), 2) AS revenue
-            FROM fact_transactions ft
-            JOIN dim_week w ON w.week_no = ft.week_no
-            GROUP BY w.week_no, w.start_date, w.is_partial_week
-        ),
-        stats AS (
-            SELECT avg(revenue) AS mean_rev, stddev_samp(revenue) AS sd_rev
-            FROM weekly WHERE NOT is_partial_week
-        )
-        SELECT w.week_no, w.start_date, w.revenue, w.is_partial_week,
-               round(((w.revenue - s.mean_rev) / nullif(s.sd_rev, 0))::numeric, 3) AS z_score,
-               round(s.mean_rev, 2) AS mean_revenue
-        FROM weekly w CROSS JOIN stats s
-        WHERE abs((w.revenue - s.mean_rev) / nullif(s.sd_rev, 0)) >= %(z)s
-        ORDER BY abs((w.revenue - s.mean_rev) / nullif(s.sd_rev, 0)) DESC
-        """, {"z": z_threshold}, timeout_ms=30_000)
+        Q.pick(Q.ANOMALIES_LOCAL, Q.ANOMALIES_PUBLISHED), {"z": z_threshold}, timeout_ms=30_000)
     return {"items": rows, "z_threshold": z_threshold,
             "note": ("Partial weeks 1 and 102 are excluded from the mean and "
                      "standard deviation but flagged if they appear, since a "
