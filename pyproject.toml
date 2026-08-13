@@ -4,21 +4,40 @@ version = "0.1.0"
 description = "Retail Revenue Intelligence Platform"
 requires-python = ">=3.12,<3.13"
 
+# CORE = what the API needs to serve the published tier, and nothing else.
+#
+# This split is deliberate and load-bearing. The scientific stack is 332.9 MB
+# against 30.0 MB for these, and Vercel's serverless limit is 250 MB. Listing
+# pandas here would put the whole pipeline into every deployment to run code
+# that never executes on the published tier -- and would put the API over the
+# limit, which is what made a separate paid host look necessary.
 dependencies = [
-    # Pinned below 3.0 deliberately: DoWhy/statsmodels (Phase 6c) trail pandas
-    # majors, and the same reasoning that put us on Python 3.12 applies here.
-    # Revisit once the causal stack declares pandas 3 support.
-    "pandas>=2.2,<3.0",
-    "numpy>=1.26,<3.0",
-    "sqlalchemy>=2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
     "psycopg[binary]>=3.2",
+    "psycopg_pool>=3.2",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    "httpx>=0.27",
     "typer>=0.12",
     "rich>=13.7",
 ]
 
 [project.optional-dependencies]
+# Everything the local pipeline needs: load, profile, benchmark, publish,
+# and causal estimation. Never installed on the published tier.
+#
+# pandas is pinned below 3.0 deliberately -- DoWhy and statsmodels trail pandas
+# majors, the same reasoning that put this project on Python 3.12.
+pipeline = [
+    "pandas>=2.2,<3.0",
+    "numpy>=1.26,<3.0",
+    "sqlalchemy>=2.0",
+    "statsmodels>=0.14",
+    "scipy>=1.13",
+    "dowhy>=0.11",
+    "matplotlib>=3.9",
+]
 dev = [
     "pytest>=8.2",
     "ruff>=0.5",

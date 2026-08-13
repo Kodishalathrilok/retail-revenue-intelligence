@@ -1,0 +1,7 @@
+# Installed by Vercel for the Python function.
+#
+# Pulls the rrip package straight from the public repo. Only the CORE
+# dependencies come with it -- the `pipeline` extra (pandas, statsmodels,
+# scipy, dowhy) is deliberately not requested, because the published tier
+# never executes that code.
+rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@main

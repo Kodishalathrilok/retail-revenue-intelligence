@@ -6,18 +6,15 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Query
 
-from rrip.ai.causal import (
-    build_panel,
-    check_parallel_trends,
-    confidence_verdict,
-    estimate_did,
-    household_attributes,
-    naive_difference,
-    propose_confounders,
-)
-from rrip.ai.provider import get_provider
 from rrip.config import settings
-from rrip.db.connection import connect
+
+# rrip.ai.causal is NOT imported here. It pulls in statsmodels, pandas, numpy
+# and scipy -- roughly 200 MB of wheels -- and on the published tier none of it
+# runs, because causal results are precomputed and read from
+# pub_causal_results. Importing it at module level would force every deployment
+# to carry the scientific stack for code that never executes there.
+#
+# The local tier imports it inside the handler, where it is genuinely used.
 
 router = APIRouter(prefix="/api/v1/causal", tags=["causal"])
 
@@ -125,6 +122,16 @@ async def analysis(campaign_id: int,
     if settings.is_published:
         return await _published_analysis(campaign_id)
 
+    from rrip.ai.causal import (
+        build_panel,
+        check_parallel_trends,
+        confidence_verdict,
+        estimate_did,
+        household_attributes,
+        naive_difference,
+    )
+    from rrip.db.connection import connect
+
     def _compute():
         """Blocking work: psycopg sync + statsmodels OLS on a 36k-row panel.
 
@@ -157,6 +164,9 @@ async def analysis(campaign_id: int,
 
     proposed = []
     if propose:
+        from rrip.ai.causal import propose_confounders
+        from rrip.ai.provider import get_provider
+
         p = get_provider()
         if p.available:
             proposed = await propose_confounders(
