@@ -106,17 +106,30 @@ Refresh is manual. The panel ended at day 711; the data does not change.
 |---|---|---|---|---|
 | 1 | **Neon account + connection string** | [neon.tech](https://neon.tech) | Hosted Postgres for the `pub_*` tables | Free tier. Create the project with **C collation** if the option is offered, so ordering matches local. Put the DSN in `.env` as `RRIP_PUBLISH_DSN`. |
 | 2 | **Vercel account** | [vercel.com](https://vercel.com) | Next.js frontend hosting | Free Hobby tier. Connect it to the GitHub repo; set root directory to `frontend/`. |
-| 3 | **A host for the FastAPI service** | Fly.io or Render | The API is Python, so Vercel cannot host it | Both have free tiers. Render is simpler; Fly is faster on cold start. Tell me which and I will write the config. |
+| 3 | **A host for the FastAPI service** | Cloud Run, Render or Fly.io | The API is Python, so Vercel cannot host it | **Fly.io has no free tier** -- it was removed in 2024, and new accounts get a 2-hour trial then need a card (~$2-5/month). See the comparison below. |
 | 4 | **Gemini API key for the hosted env** | already have | NL→SQL and narration | Set as an environment variable on the API host — **not** committed. The rotated key is fine. |
 | 5 | **GitHub repository** | — | CI already exists and needs somewhere to run | Currently local-only, no remote. |
 
-**Not needed:** any paid tier, any domain, any Anthropic key.
+**Not needed:** any domain, any Anthropic key.
 
-### One decision I need from you
+### Choosing an API host
 
-**Item 3 — Render or Fly.io.** They differ in a way that matters here: Render's
-free tier sleeps after inactivity and takes ~30 seconds to wake, which on this
-project means the first causal request after idle looks broken. Fly stays warm
-longer but its free allowance is metered.
+Verified August 2026. **Fly.io no longer has a free tier** -- it ended in 2024,
+and the earlier version of this document was wrong to call it free.
 
-Given the causal endpoint takes ~12 seconds even warm, I would pick **Fly.io**.
+| Host | Free? | Cold start | Notes |
+|---|---|---|---|
+| **Google Cloud Run** | Yes -- 2M requests/month, scales to zero | ~5-10s for a Python image | Best free option. Docker-native, so the existing Dockerfile works. Needs a card on file for the account, but the free allowance is real. |
+| **Render** | Yes | **~30s** after 15 min idle | Simplest to set up. The cold start is the problem: the causal endpoint already takes ~12s warm, so a first request after idle looks broken. |
+| **Fly.io** | **No** | ~2s, stays warm | ~$2-5/month for one always-on 512MB machine. Best experience, not free. |
+
+**Recommendation depends on what you are optimising:**
+
+- **Free and acceptable** -- Cloud Run. Scales to zero, so an idle demo costs
+  nothing, and a 5-10s cold start is tolerable for a portfolio piece.
+- **Free and simplest** -- Render, if you can live with a 30s first load.
+- **Best demo experience** -- Fly.io at ~$2-5/month. Worth it if you are sending
+  the link to an interviewer and want it instant.
+
+`fly.toml` and the `Dockerfile` are already written; the Dockerfile works
+unchanged on Cloud Run and Render, both of which build from it.
