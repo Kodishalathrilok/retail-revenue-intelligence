@@ -18,6 +18,9 @@ from rrip.config import PROJECT_ROOT, settings
 
 
 def conninfo() -> str:
+    """Connection string, preferring RRIP_PG_DSN when set (see rrip.api.db)."""
+    if settings.pg_dsn:
+        return settings.pg_dsn
     return (
         f"host={settings.pg_host} port={settings.pg_port} "
         f"user={settings.pg_user} password={settings.pg_password} "

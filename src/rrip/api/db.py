@@ -23,6 +23,15 @@ _pool: AsyncConnectionPool | None = None
 
 
 def conninfo() -> str:
+    """Connection string, preferring a full DSN when one is configured.
+
+    Hosted providers issue a DSN carrying sslmode and other options. Rebuilding
+    it from host/user/password silently drops those, and Neon refuses a
+    connection without sslmode -- which surfaces as a pool timeout rather than
+    an SSL error.
+    """
+    if settings.pg_dsn:
+        return settings.pg_dsn
     return (
         f"host={settings.pg_host} port={settings.pg_port} "
         f"user={settings.pg_user} password={settings.pg_password} "

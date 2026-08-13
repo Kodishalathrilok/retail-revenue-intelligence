@@ -16,6 +16,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # A full connection string, which takes precedence over the individual
+    # fields below when set. Hosted Postgres is handed out as a DSN including
+    # sslmode and channel_binding, and reassembling that from parts loses the
+    # options -- Neon rejects a connection without sslmode.
+    pg_dsn: str = Field(default="", alias="RRIP_PG_DSN")
+
     pg_host: str = Field(default="localhost", alias="RRIP_PG_HOST")
     pg_port: int = Field(default=5432, alias="RRIP_PG_PORT")
     pg_user: str = Field(default="postgres", alias="RRIP_PG_USER")
