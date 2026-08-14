@@ -83,6 +83,49 @@ def recover(scenario: str, **kwargs) -> RecoveryResult:
     )
 
 
+def coverage_study(n_sims: int = 100, true_effect: float = 5.0,
+                   base_seed: int = 1000, **panel_kwargs) -> dict:
+    """Repeat the experiment across seeds and measure BIAS and CI COVERAGE.
+
+    A single recovery is an anecdote. If the estimator is unbiased and the
+    standard errors are honest, then across many synthetic datasets the mean
+    estimate lands on the true effect and the 95% interval contains it about 95%
+    of the time. Coverage far below 95% means the intervals are too narrow --
+    the estimator would be reporting more certainty than it has, which is the
+    specific failure that makes a causal number dangerous rather than merely
+    wrong.
+
+    Deliberately smaller panels than the real campaign: this runs a hundred
+    model fits, and the question here is the sampling behaviour of the
+    estimator, not its performance at production scale.
+    """
+    defaults = dict(n_treated=120, n_control=400, pre_weeks=12, post_weeks=6)
+    defaults.update(panel_kwargs)
+
+    estimates, covered, widths = [], 0, []
+    for i in range(n_sims):
+        df = synthetic_panel(true_effect=true_effect, seed=base_seed + i, **defaults)
+        res = estimate_did(df)
+        estimates.append(res["did_estimate"])
+        widths.append(res["ci_high"] - res["ci_low"])
+        if res["ci_low"] <= true_effect <= res["ci_high"]:
+            covered += 1
+
+    arr = np.array(estimates)
+    return {
+        "n_simulations": n_sims,
+        "true_effect": true_effect,
+        "mean_estimate": float(arr.mean()),
+        "bias": float(arr.mean() - true_effect),
+        "sd_of_estimates": float(arr.std(ddof=1)),
+        "ci_coverage_pct": round(100 * covered / n_sims, 1),
+        "nominal_coverage_pct": 95.0,
+        "mean_ci_width": float(np.mean(widths)),
+        "panel": defaults,
+        "base_seed": base_seed,
+    }
+
+
 def run_suite() -> list[RecoveryResult]:
     """Scenarios chosen so that some MUST fail -- an estimator that passes
     everything is not being tested."""

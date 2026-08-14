@@ -1,0 +1,43 @@
+// Forecast behaviour benchmark. One JSON object per line.
+// Every expectation is mechanically checkable: a routing verdict, an extracted
+// parameter, a refusal code, or an arithmetic property of the payload. There is
+// no LLM judge here, for the same reason there is none in the narration
+// benchmark -- a grader that can be persuaded is not a measurement.
+//
+// `expect` keys are compared for equality against the observed payload, except
+// for the four computed checks handled in rrip.eval.forecast_bench._check:
+//   prediction_within, interval_contains_prediction,
+//   explanation_sums_to_prediction, confidence_reasons_nonempty
+{"id": "route-01", "category": "routing", "question": "What is next week's expected Grocery revenue?", "expect": {"verdict": "FORECAST", "rule": "forecast_intent", "department": "GROCERY", "horizon": 1}, "note": "The canonical predictive question."}
+{"id": "route-02", "category": "routing", "question": "Forecast revenue for the produce department.", "expect": {"verdict": "FORECAST", "department": "PRODUCE", "horizon": 1}}
+{"id": "route-03", "category": "routing", "question": "How much will the meat department make next week?", "expect": {"verdict": "FORECAST", "department": "MEAT", "horizon": 1}, "note": "No forecast keyword at all -- 'how much will' plus 'next week' carries it."}
+{"id": "route-04", "category": "routing", "question": "What is the projected revenue for DRUG GM?", "expect": {"verdict": "FORECAST", "department": "DRUG GM", "horizon": 1}}
+{"id": "route-05", "category": "routing", "question": "Predict the fuel department's revenue for the coming week.", "expect": {"verdict": "FORECAST", "department": "KIOSK-GAS", "horizon": 1}, "note": "Alias: nobody calls it KIOSK-GAS."}
+{"id": "route-06", "category": "routing", "question": "What is the total revenue by department?", "expect": {"verdict": "ANSWERABLE"}, "note": "Descriptive. Must NOT be routed to the forecaster."}
+{"id": "route-07", "category": "routing", "question": "Show revenue per week for the first 20 weeks.", "expect": {"verdict": "ANSWERABLE"}}
+{"id": "route-08", "category": "routing", "question": "Which departments show the biggest drop in revenue between weeks?", "expect": {"verdict": "ANSWERABLE"}, "note": "Contains 'drop' and a comparison, but asks about the past."}
+{"id": "route-09", "category": "routing", "question": "How much will packaged meat make next week?", "expect": {"verdict": "FORECAST", "department": "MEAT-PCKGD", "horizon": 1}, "note": "Regression: 'meat' is a substring of this and once won the match, silently forecasting a different series."}
+{"id": "route-10", "category": "routing", "question": "What is the outlook for bakery revenue?", "expect": {"verdict": "FORECAST", "department": "PASTRY", "horizon": 1}}
+
+{"id": "scope-01", "category": "scope", "question": "Predict how many units we will sell next week.", "expect": {"verdict": "UNSUPPORTED", "rule": "forecast_scope"}, "note": "Units were never modelled. Answering with revenue would be worse than refusing."}
+{"id": "scope-02", "category": "scope", "question": "Forecast the number of baskets next week.", "expect": {"verdict": "UNSUPPORTED", "rule": "forecast_scope"}}
+{"id": "scope-03", "category": "scope", "question": "How many active households will we have next week?", "expect": {"verdict": "UNSUPPORTED", "rule": "forecast_scope"}}
+{"id": "scope-04", "category": "scope", "question": "Will customer satisfaction improve next week?", "expect": {"verdict": "UNSUPPORTED", "rule": "sentiment"}, "note": "Absent-domain refusal must win over forecast routing -- there is no satisfaction data to forecast."}
+{"id": "scope-05", "category": "scope", "question": "What will our profit margin be next week?", "expect": {"verdict": "UNSUPPORTED", "rule": "cost_and_margin"}, "note": "No cost data exists, so no margin can be forecast."}
+{"id": "scope-06", "category": "scope", "question": "Predict next week's revenue for our competitors.", "expect": {"verdict": "UNSUPPORTED", "rule": "competitor"}}
+
+{"id": "gov-01", "category": "governance", "question": "Forecast Grocery revenue 3 weeks ahead.", "expect": {"verdict": "FORECAST", "department": "GROCERY", "horizon": 3, "error": "UNSUPPORTED_HORIZON"}, "note": "The horizon is extracted faithfully and then refused. Clamping it to 1 would answer a different question under this one's label."}
+{"id": "gov-02", "category": "governance", "question": "Forecast Grocery revenue 8 weeks ahead.", "expect": {"verdict": "FORECAST", "horizon": 8, "error": "UNSUPPORTED_HORIZON"}}
+{"id": "gov-03", "category": "governance", "question": "What is next week's forecast for the garden centre?", "expect": {"verdict": "FORECAST", "department": "GARDEN CENTER", "error": "INSUFFICIENT_HISTORY"}, "note": "GARDEN CENTER sold nothing for the whole trailing window, so its scale is $0.00. Refusing is correct; the alternative is a number extrapolated from no history."}
+{"id": "gov-04", "category": "governance", "question": "Forecast revenue for the video rental department next week.", "expect": {"verdict": "FORECAST", "department": null, "unknown_department": null}, "note": "Not a modelled department and not an alias; the caller is told which departments exist rather than given a number."}
+{"id": "gov-05", "category": "governance", "question": "Forecast next week's revenue.", "expect": {"verdict": "FORECAST", "department": null}, "note": "No department named. The forecast is per department, so this needs a clarification, not a panel total the model was never scored on."}
+{"id": "gov-06", "category": "governance", "question": "Forecast next week's floral revenue.", "expect": {"verdict": "FORECAST", "department": "FLORAL", "confidence": "LOW", "confidence_reasons_nonempty": true}, "note": "Measured test WAPE 60.5% against 9.9% pooled. Serving that at the same confidence as GROCERY would be the dishonest option."}
+{"id": "gov-07", "category": "governance", "question": "What is next week's expected Grocery revenue?", "expect": {"verdict": "FORECAST", "department": "GROCERY", "confidence": "NORMAL"}, "note": "The counterweight to gov-06. If every department returned LIMITED the flag would carry no information -- which is exactly what an earlier version did."}
+{"id": "gov-08", "category": "governance", "question": "Forecast revenue for MISC SALES TRAN next week.", "expect": {"verdict": "FORECAST", "department": "MISC SALES TRAN", "confidence": "LOW"}, "note": "3.3x the pooled error. The tiering must separate three levels, not two."}
+
+{"id": "payload-01", "category": "payload", "question": "What is next week's expected Grocery revenue?", "expect": {"interval_contains_prediction": true, "explanation_sums_to_prediction": true}, "note": "The deployed predictor is a trailing mean, so its explanation is its arithmetic and must reconcile exactly."}
+{"id": "payload-02", "category": "payload", "question": "Forecast revenue for the produce department.", "expect": {"interval_contains_prediction": true, "explanation_sums_to_prediction": true}}
+{"id": "payload-03", "category": "payload", "question": "What is next week's expected Grocery revenue?", "expect": {"forecast_week": 102, "caveats_nonempty": true}, "note": "Week 102 is a 6-day week. That is a property of the week, so it belongs in caveats and applies to every department equally -- unlike confidence, which is per department."}
+{"id": "payload-04", "category": "payload", "question": "Forecast DRUG GM revenue for next week.", "expect": {"prediction_within": [5000, 20000]}, "note": "Sanity bound from the observed range, not a precision claim. It catches a unit error or a broken scale, which is what it is for."}
+{"id": "payload-05", "category": "payload", "question": "What is next week's expected Grocery revenue?", "expect": {"prediction_within": [30000, 60000]}, "note": "GROCERY runs about $44k a week across the modelling window."}
+{"id": "payload-06", "category": "payload", "question": "Forecast the deli department's revenue.", "expect": {"interval_contains_prediction": true, "explanation_sums_to_prediction": true, "model_type": "trailing_mean_4"}, "note": "Pins the deployed predictor. If a future run promotes the challenger, this case fails and forces the report to be updated with it."}

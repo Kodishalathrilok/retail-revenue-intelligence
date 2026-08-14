@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "rrip.cli", "serve"],
+      "port": 8010
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
+      "port": 3000
+    }
+  ]
+}

@@ -421,13 +421,17 @@ def main() -> int:
             f"Rows removed: {', '.join('`' + d['case_id'] + '`' for d in removed)}. "
             f"Surviving: {', '.join('`' + d['case_id'] + '`' for d in surviving)}.",
             "",
-            "The direction of the finding does not change — every surviving "
-            "discordant pair still favours the structured arm, and none "
-            "favours baseline. What changes is that the evidence gets thinner: "
-            "the reported figure was already not significant at p = "
-            f"{s['paired']['mcnemar_exact_p']}, and correcting the defect moves "
-            f"it to p = {p_corr}. **The structured-metric architecture is "
-            "supported by two cases, not three.**", "",
+            "Every surviving discordant pair still favours the structured arm "
+            "and none favours baseline, but that direction is not evidence. "
+            f"**p = {p_corr} is the smallest value attainable with "
+            f"{len(surviving)} discordant pairs**: even a perfect "
+            f"{len(surviving)}-0 split cannot go below it. The design has no "
+            "power to detect a difference at this sample size, so the A/B "
+            "claim is withdrawn rather than described as thin.", "",
+            "What survives is architectural and does not rest on this test: "
+            "numeric metrics are computed deterministically by "
+            "`rrip.ai.derive`, and the narration layer is evaluated against "
+            "them. That is verifiable by reading the wiring.", "",
             "The per-arm faithfulness percentages are NOT restated here. "
             "Recomputing them would mean re-running the classifier with the "
             "defect fixed, and fixing it is out of scope for this task by "

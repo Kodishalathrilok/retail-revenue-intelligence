@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     pg_password: str = Field(default="", alias="RRIP_PG_PASSWORD")
     pg_database: str = Field(default="rrip", alias="RRIP_PG_DATABASE")
 
+    # Credentials for the API's connection pool ONLY, so that serving requests
+    # and loading data do not share an account.
+    #
+    # The settings above are the LOADER's: `rrip load` and `rrip publish` write,
+    # so they need an owning role. The API does not -- and it plans and executes
+    # model-proposed SQL from a public endpoint, where the validation gates are
+    # defence in depth rather than a boundary (see sql/ddl/60_readonly_role.sql).
+    #
+    # Empty means the API falls back to the credentials above and logs a warning
+    # at startup. That fallback exists so a fresh clone runs before the role is
+    # created; it is not a deployment configuration.
+    pg_readonly_dsn: str = Field(default="", alias="RRIP_PG_READONLY_DSN")
+
     # Calendar anchor for dim_date. dunnhumby publishes no start date, only
     # DAY 1..711. This must be a WEDNESDAY so that day 6 falls on a Monday and
     # derived weeks align with the source WEEK_NO column that causal_data is

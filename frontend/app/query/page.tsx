@@ -70,7 +70,7 @@ export default function QueryPage() {
       <div className="rounded-lg border border-slate-200 bg-white p-5">
         <textarea
           value={q} onChange={(e) => setQ(e.target.value)} rows={2}
-          className="w-full resize-none rounded-md border border-slate-300 p-3 text-sm"
+          className="w-full resize-none rounded-md border border-slate-300 bg-white p-3 text-sm text-slate-900 placeholder:text-slate-400"
         />
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button onClick={run} disabled={busy}

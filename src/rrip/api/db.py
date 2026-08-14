@@ -7,6 +7,7 @@ is an endpoint that can exhaust the pool, and Phase 2 measured queries taking
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -16,6 +17,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from rrip.config import settings
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_TIMEOUT_MS = 15_000
 MAX_TIMEOUT_MS = 120_000
 
@@ -23,13 +26,29 @@ _pool: AsyncConnectionPool | None = None
 
 
 def conninfo() -> str:
-    """Connection string, preferring a full DSN when one is configured.
+    """Connection string for the API pool, preferring the read-only role.
+
+    The API serves a public NL->SQL endpoint that plans and executes SQL a
+    language model proposed. Its validation gates reject what they recognise,
+    but they are string analysis over SQL text and one bypass already got past
+    them (see the module docstring of rrip.ai.nl2sql). The privilege boundary is
+    the database role, so the API takes its own credentials here rather than
+    inheriting the loader's.
 
     Hosted providers issue a DSN carrying sslmode and other options. Rebuilding
     it from host/user/password silently drops those, and Neon refuses a
     connection without sslmode -- which surfaces as a pool timeout rather than
     an SSL error.
     """
+    if settings.pg_readonly_dsn:
+        return settings.pg_readonly_dsn
+
+    logger.warning(
+        "RRIP_PG_READONLY_DSN is not set -- the API is connecting with the "
+        "loader's credentials, which can write. The NL->SQL endpoint is "
+        "reachable by anyone who can reach the API. Create the read-only role "
+        "with sql/ddl/60_readonly_role.sql before exposing this service.")
+
     if settings.pg_dsn:
         return settings.pg_dsn
     return (

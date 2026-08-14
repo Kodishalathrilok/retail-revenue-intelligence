@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from rrip.ai.provider import LLMProvider
@@ -111,7 +112,14 @@ def collect_allowed(data: Any) -> set[float]:
                 walk(v)
         elif isinstance(node, bool):
             return
-        elif isinstance(node, (int, float)):
+        elif isinstance(node, (int, float, Decimal)):
+            # Decimal is load-bearing. Postgres returns every NUMERIC column as
+            # Decimal, and Decimal is not an int and not a float -- so without
+            # it this walk skipped every monetary value in the input, the
+            # allowed set contained only the integer columns, and the guard
+            # rejected wholly correct narratives. A true sentence about revenue
+            # of 1000.00 reported "1000.0 does not appear in the computed input
+            # data" while 1000.00 was sitting in the input.
             _add(float(node))
         elif isinstance(node, str):
             for val, _ctx in extract_numbers(node):
@@ -126,6 +134,26 @@ def collect_allowed(data: Any) -> set[float]:
             # An integer-valued float and its int form are the same number.
             if float(v).is_integer():
                 allowed.add(int(v))
+        # The magnitude of a negative value.
+        #
+        # Found by the narration benchmark: given percent_change = -19.0, the
+        # model wrote "a decrease of 19.0 percent" -- which is correct English
+        # and the normal way to render a fall -- and the guard rejected it,
+        # because 19.0 was not in the allowed set. The guard was reading signs
+        # as if they were digits.
+        #
+        # THE TRADE-OFF, stated because it is a real loosening: after this, a
+        # narrative claiming a 19% *rise* on data that fell 19% passes the
+        # NUMERIC check. Direction is not a numeric property and this guard was
+        # never able to police it; that is the job of the direction assertions
+        # in the narration benchmark, and of a reader. Admitting a correct
+        # sentence matters more than pretending to catch a class of error the
+        # mechanism cannot see.
+        if v < 0:
+            for places in (0, 1, 2, 3):
+                allowed.add(round(-v, places))
+            if float(-v).is_integer():
+                allowed.add(int(-v))
 
     walk(data)
     return allowed
@@ -217,3 +245,26 @@ async def narrate(data: Any, question: str, provider: LLMProvider) -> NarrationR
 
     return NarrationResult(ok=True, narrative=narrative, raw_response=raw,
                            provider=provider.name)
+
+
+async def narrate_result(rows: list[dict], columns: list[str], question: str,
+                         provider: LLMProvider,
+                         derive_metrics: bool = True) -> NarrationResult:
+    """Narrate a query result, deriving the arithmetic first.
+
+    This is the path the API should use. The guard below is unchanged and still
+    rejects anything ungrounded -- what changes is that the model no longer has
+    to invent a percentage to say something true, because rrip.ai.derive has
+    already computed it and put it in the payload under a name.
+
+    `derive_metrics=False` sends the raw rows instead, which is what the system
+    did before. It exists so the two can be compared on the same result sets
+    rather than the improvement being asserted -- see rrip.eval.narration_bench.
+    """
+    from rrip.ai.derive import derive
+
+    if not derive_metrics:
+        return await narrate({"columns": columns, "rows": rows}, question, provider)
+
+    payload = derive(rows, columns, question).data
+    return await narrate(payload, question, provider)

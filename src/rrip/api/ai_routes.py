@@ -104,6 +104,89 @@ async def narrate_endpoint(payload: dict, provider: str | None = None) -> dict:
     }
 
 
+@router.post("/ask")
+async def ask(payload: dict, provider: str | None = None) -> dict:
+    """Route a question to SQL analytics or to the forecasting model.
+
+    The descriptive/predictive split, made structural. The router classifies
+    first and deterministically -- no model call -- and a FORECAST verdict never
+    reaches SQL generation.
+
+    That ordering is the point. Asked "what will Grocery revenue be next week?"
+    with only a SQL tool available, a language model does not refuse; it writes
+    a valid aggregate over historical rows and returns a number that passes
+    every gate this project has and is not a forecast. The routing decision is
+    what prevents it, and it is a table lookup rather than a judgement.
+
+    The model's total involvement on the forecast path is picking a department
+    name from a closed list, and only when the deterministic matcher finds
+    none. Every figure comes from rrip.forecast.
+    """
+    from rrip.ai import forecast_intent as FI
+    from rrip.ai.router import FORECAST, classify
+    from rrip.forecast import service as FS
+
+    question = (payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(400, "payload must include 'question'")
+
+    routing = classify(question)
+    if routing.verdict != FORECAST:
+        return {"question": question, "route": "sql",
+                "routing": routing.to_dict(),
+                "note": ("Not a predictive question. Send it to "
+                         "POST /api/v1/ai/query for the NL->SQL path.")}
+
+    try:
+        store = FS.load_store()
+    except FS.ForecastUnavailable as exc:
+        raise HTTPException(503, {"error": FS.ForecastUnavailable.code,
+                                  "message": str(exc)}) from exc
+
+    intent = FI.resolve(question, store.departments)
+    if not intent.is_complete:
+        try:
+            p = _provider(provider)
+            if p.available:
+                intent = await FI.resolve_with_llm(question, store.departments, p)
+        except (ValueError, LLMUnavailable):
+            # The deterministic matcher already ran. A provider that is missing
+            # or refusing costs a clarification prompt, not an answer.
+            pass
+
+    if not intent.is_complete:
+        return {
+            "question": question, "route": "forecast", "succeeded": False,
+            "routing": routing.to_dict(), "intent": intent.to_dict(),
+            "error": ("UNMODELLED_DEPARTMENT" if intent.unknown_department
+                      else "DEPARTMENT_NOT_IDENTIFIED"),
+            "message": (
+                f"{intent.unknown_department!r} is a department in this dataset "
+                "but was not modelled -- it did not meet the inclusion rule on "
+                "the training weeks."
+                if intent.unknown_department else
+                "Which department? The forecast is produced per department."),
+            "available_departments": store.departments,
+        }
+
+    try:
+        result = FS.forecast(intent.department, horizon=intent.horizon)
+    except FS.ForecastRequestError as exc:
+        return {"question": question, "route": "forecast", "succeeded": False,
+                "routing": routing.to_dict(), "intent": intent.to_dict(),
+                **exc.to_dict()}
+
+    return {
+        "question": question, "route": "forecast", "succeeded": True,
+        "routing": routing.to_dict(), "intent": intent.to_dict(),
+        "forecast": result,
+        "guard": ("The language model selected a department name from a fixed "
+                  "list and nothing else. The prediction, the interval and the "
+                  "confidence flag were computed by rrip.forecast and scored on "
+                  "a held-out temporal test set."),
+    }
+
+
 @router.get("/anomalies")
 async def anomalies(z_threshold: float = 2.5) -> dict:
     """Anomalies computed in SQL, ready to be narrated.

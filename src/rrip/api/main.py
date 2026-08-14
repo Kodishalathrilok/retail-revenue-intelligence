@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from rrip.api import ai_routes, analytics, causal_routes
+from rrip.api import ai_routes, analytics, causal_routes, forecast_routes
 from rrip.api.db import close_pool, open_pool
 from rrip.config import settings
 
@@ -52,6 +52,7 @@ app.add_middleware(
 app.include_router(analytics.router)
 app.include_router(ai_routes.router)
 app.include_router(causal_routes.router)
+app.include_router(forecast_routes.router)
 
 
 @app.get("/health")

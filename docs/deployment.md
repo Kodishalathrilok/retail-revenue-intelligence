@@ -109,8 +109,39 @@ Refresh is manual. The panel ended at day 711; the data does not change.
 | 3 | **A host for the FastAPI service** | Cloud Run, Render or Fly.io | The API is Python, so Vercel cannot host it | **Fly.io has no free tier** -- it was removed in 2024, and new accounts get a 2-hour trial then need a card (~$2-5/month). See the comparison below. |
 | 4 | **Gemini API key for the hosted env** | already have | NL→SQL and narration | Set as an environment variable on the API host — **not** committed. The rotated key is fine. |
 | 5 | **GitHub repository** | — | CI already exists and needs somewhere to run | Currently local-only, no remote. |
+| 6 | **Read-only role on the published database** | Neon SQL editor or `psql` | The NL→SQL endpoint is public; the validator is defence in depth, the role is the boundary | Run [`sql/ddl/60_readonly_role.sql`](../sql/ddl/60_readonly_role.sql) **after** `rrip publish` creates the tables, then point `RRIP_PG_DSN` at `rrip_ro`. See below. |
 
 **Not needed:** any domain, any Anthropic key.
+
+### The read-only role is not optional
+
+Anyone on the internet can type a question into `/query` and cause SQL to be
+planned and executed. The six validation gates in `src/rrip/ai/nl2sql.py` reject
+what they can recognise, but they are string analysis, and one bypass —
+`SELECT query_to_xml('DELETE FROM …', …)`, which executes its own text argument
+— passed every gate that existed before the function allowlist was added.
+
+So the API must not connect as the table owner:
+
+```bash
+psql "$RRIP_PUBLISH_DSN" -v ro_password='<generate one>' -f sql/ddl/60_readonly_role.sql
+```
+
+Then set `RRIP_PG_DSN` to the same connection string with the user and password
+swapped for `rrip_ro`. Run it again after any `rrip publish` that adds a table —
+`ALTER DEFAULT PRIVILEGES` covers new tables created by the same owning role,
+but not tables created by a different one.
+
+Verify from the API's own credentials, not the owner's:
+
+```bash
+psql "$RRIP_PG_DSN" -c "CREATE TABLE probe (x int)"   # must fail: permission denied
+psql "$RRIP_PG_DSN" -c "DELETE FROM pub_headline"     # must fail: permission denied
+psql "$RRIP_PG_DSN" -c "SELECT count(*) FROM pub_headline"   # must succeed
+```
+
+Two failures and one success is the passing result. If the first two succeed,
+the API is still connecting as the owner and the boundary does not exist.
 
 ### Choosing an API host
 

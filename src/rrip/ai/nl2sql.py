@@ -6,14 +6,42 @@ reject-and-retry behaviour is observable rather than inferred from a final
 answer.
 
 Gates, in order:
-  1. shape      -- exactly one statement, and it must be a SELECT
+  0. route      -- answerability, BEFORE any model call (rrip.ai.router)
+  1. shape      -- exactly one statement, it must be a SELECT, no recursion
   2. keywords   -- no DDL/DML, no multi-statement, no dangerous functions
-  3. explain    -- EXPLAIN (no ANALYZE) and reject above a cost ceiling
-  4. execute    -- hard statement timeout, row cap
-  5. result     -- validate the returned shape
+  3. functions  -- every called function is on an allowlist; no catalog access
+  4. explain    -- EXPLAIN (no ANALYZE) and reject above a cost ceiling
+  5. execute    -- hard statement timeout, row cap
+  6. result     -- validate the returned shape
 
 A rejection at any gate is fed back to the model as an error message, up to a
-configured attempt limit.
+configured attempt limit. Gate 0 is different: it rejects the QUESTION rather
+than the SQL, so there is nothing to feed back and no model call is made. It was
+added because the first benchmark run answered three of four questions this
+schema holds no data for -- see rrip.ai.router.
+
+THESE GATES ARE NOT THE SECURITY BOUNDARY
+
+They are a program reasoning about SQL text, and every such program has a
+bypass. This one had a real one: `SELECT query_to_xml('DELETE FROM t', ...)`
+executes its argument, and the argument is a string literal -- which gate 2
+strips before scanning, precisely so a keyword inside a quoted string cannot
+cause a false reject. Gate 4 did not catch it either, because EXPLAIN without
+ANALYZE never executes a function body. Gate 3 exists because a denylist could
+not close that class: `query_to_xml` was simply not on it, and neither were the
+functions nobody had thought of yet.
+
+The boundary is the database role. sql/ddl/60_readonly_role.sql creates one that
+holds SELECT and nothing else. Run it before exposing this endpoint. Gates are
+what turn a rejection into a useful error message for the model to retry
+against; the role is what makes a missed rejection survivable.
+
+Measured, because the earlier version of this note overstated it: the DELETE
+form of that bypass is refused by Postgres for everyone including a superuser
+(query_to_xml is STABLE, SQLSTATE 0A000), so the role is not what stops it. The
+SELECT form does execute, as the calling role -- which is where the role earns
+its place, by bounding what the executed text can reach. See
+src/rrip/eval/verify_role.py and reports/eval/readonly-role.json.
 """
 
 from __future__ import annotations
@@ -23,6 +51,7 @@ import time
 from dataclasses import dataclass, field
 
 from rrip.ai.provider import LLMProvider
+from rrip.ai.router import classify
 from rrip.api.db import acquire
 
 MAX_COST = 5_000_000.0
@@ -38,6 +67,80 @@ FORBIDDEN = (
     "pg_read_file", "pg_write", "pg_ls_dir", "lo_import", "lo_export",
     "dblink", "pg_sleep", "set_config", "pg_terminate", "pg_cancel",
 )
+
+# Gate 3 is an ALLOWLIST, because the denylist above cannot be completed. It
+# only has to cover what analytics on this star schema actually needs; anything
+# absent is a rejection the model can retry against, not a silent failure.
+#
+# Deliberately ABSENT, each for a reason:
+#   query_to_xml, query_to_xmlschema, ... -- execute their text argument
+#   dblink, dblink_exec                   -- open outbound connections
+#   generate_series, unnest               -- unbounded row generation; the
+#                                            planner estimates a flat 1000 rows
+#                                            regardless of arguments, so gate 4
+#                                            cannot price them. dim_date and
+#                                            dim_week already cover every date
+#                                            series this schema needs.
+#   lo_*, pg_*                            -- large objects, catalogs, files
+ALLOWED_FUNCTIONS = frozenset({
+    # aggregates
+    "count", "sum", "avg", "min", "max", "stddev", "stddev_samp", "stddev_pop",
+    "variance", "var_samp", "var_pop", "corr", "covar_pop", "covar_samp",
+    "percentile_cont", "percentile_disc", "mode", "string_agg", "array_agg",
+    "bool_and", "bool_or", "every",
+    # window
+    "row_number", "rank", "dense_rank", "percent_rank", "cume_dist", "ntile",
+    "lag", "lead", "first_value", "last_value", "nth_value",
+    # math
+    "abs", "ceil", "ceiling", "floor", "round", "trunc", "sign", "sqrt",
+    "power", "exp", "ln", "log", "mod", "div", "greatest", "least",
+    "width_bucket",
+    # string
+    "lower", "upper", "initcap", "length", "char_length", "character_length",
+    "substring", "substr", "trim", "btrim", "ltrim", "rtrim", "lpad", "rpad",
+    "replace", "split_part", "position", "strpos", "concat", "concat_ws",
+    "to_char", "left", "right", "reverse", "starts_with",
+    # date and time
+    "age", "date_trunc", "date_part", "extract", "to_date", "to_timestamp",
+    "make_date", "make_interval", "justify_days", "now", "current_date",
+    "current_timestamp",
+    # conditional and null handling
+    "coalesce", "nullif",
+    # casts written in function form, and type names carrying a precision
+    "cast", "numeric", "decimal", "integer", "int", "bigint", "smallint",
+    "real", "float", "double", "text", "varchar", "char", "boolean", "date",
+    "timestamp", "timestamptz", "time", "interval",
+})
+
+# Words that can legally sit immediately before "(" without being a call.
+# Without these, `WHERE x IN (...)` reads as a call to a function named "in".
+NON_CALL_KEYWORDS = frozenset({
+    "select", "from", "where", "and", "or", "not", "in", "exists", "any",
+    "all", "some", "values", "on", "using", "as", "by", "over", "partition",
+    "order", "group", "having", "when", "then", "else", "case", "end",
+    "union", "intersect", "except", "with", "recursive", "distinct", "filter",
+    "within", "join", "inner", "left", "right", "full", "outer", "cross",
+    "lateral", "natural", "limit", "offset", "fetch", "between", "is", "null",
+    "true", "false", "asc", "desc", "nulls", "first", "last", "rows", "range",
+    "groups", "preceding", "following", "unbounded", "current", "row",
+    "returning", "into", "array", "at", "zone", "collate", "like", "ilike",
+    "similar", "escape", "for", "of", "if",
+})
+
+CALL_RE = re.compile(r"([a-z_][a-z0-9_$]*)\s*\(", re.IGNORECASE)
+
+# `WITH name AS (`, `WITH name(cols) AS (`, and the same after a comma. These
+# names are call-shaped when a column list follows, so they are collected and
+# exempted rather than reported as unknown functions.
+CTE_RE = re.compile(
+    r"(?:\bwith\b|,)\s*([a-z_][a-z0-9_$]*)\s*(?:\([^)]*\))?\s+as\s*"
+    r"(?:(?:not\s+)?materialized\s*)?\(",
+    re.IGNORECASE)
+
+# Anything reaching the catalogs or the server filesystem. One rule rather than
+# an enumeration, because the enumeration is what failed: pg_shadow, pg_stat_*,
+# pg_read_binary_file and pg_ls_waldir were all absent from FORBIDDEN.
+CATALOG_RE = re.compile(r"\b(pg_[a-z0-9_]*|information_schema)\b", re.IGNORECASE)
 
 SCHEMA_PROMPT = """\
 You write PostgreSQL SELECT queries against a retail star schema.
@@ -154,8 +257,14 @@ def schema_prompt() -> str:
     would look like a model error rather than a configuration one.
     """
     from rrip.config import settings
+    from rrip.semantic import render_prompt
 
-    return PUBLISHED_SCHEMA_PROMPT if settings.is_published else SCHEMA_PROMPT
+    base = PUBLISHED_SCHEMA_PROMPT if settings.is_published else SCHEMA_PROMPT
+    # Metric definitions are appended from rrip.semantic rather than written
+    # inline, so "average basket value is per basket_id" exists in exactly one
+    # place and reaches the model, the router, the evaluator and the docs from
+    # that one edit. It used to exist in four, which is three chances to drift.
+    return f"{base}\n\n{render_prompt(published=settings.is_published)}"
 
 
 @dataclass
@@ -186,6 +295,9 @@ class NL2SQLResult:
     total_duration_ms: float = 0.0
     provider: str | None = None
     failure_reason: str | None = None
+    # Set when the answerability router decided the question before any model
+    # call. None means the router was disabled or waved the question through.
+    routing: dict | None = None
 
 
 def strip_sql_noise(sql: str) -> str:
@@ -253,6 +365,16 @@ def validate_shape(sql: str) -> Stage:
             r"\)\s*select\b", body, re.IGNORECASE | re.DOTALL):
         return Stage("shape", False, "WITH clause does not terminate in a SELECT", ms)
 
+    # WITH RECURSIVE is rejected outright. The cost gate cannot price it: the
+    # planner guesses a fixed multiple of the non-recursive term, so
+    # `WITH RECURSIVE b(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM b)` estimates
+    # cheap and runs until the statement timeout. Nothing this star schema is
+    # asked about needs recursion -- there is no hierarchy in it.
+    if re.search(r"\bwith\s+recursive\b", body, re.IGNORECASE):
+        return Stage("shape", False,
+                     "WITH RECURSIVE is not allowed -- recursive CTEs cannot be "
+                     "cost-bounded; express the query without recursion", ms)
+
     return Stage("shape", True, "single SELECT", ms)
 
 
@@ -265,6 +387,48 @@ def validate_keywords(sql: str) -> Stage:
         return Stage("keywords", False,
                      f"forbidden keyword(s): {', '.join(sorted(set(found)))}", ms)
     return Stage("keywords", True, "no forbidden keywords", ms)
+
+
+def validate_functions(sql: str) -> Stage:
+    """Allowlist every called function, and refuse catalog access outright.
+
+    Runs on SQL stripped of comments and string literals, so a name inside a
+    quoted string is not mistaken for a call. That stripping is also why this
+    gate has to exist: it is what hid `query_to_xml`'s payload from the keyword
+    scan, and no denylist entry would have covered the functions nobody had
+    thought of.
+    """
+    t0 = time.perf_counter()
+    bare = strip_sql_noise(sql)
+
+    catalog = CATALOG_RE.search(bare)
+    if catalog:
+        ms = (time.perf_counter() - t0) * 1000
+        return Stage("functions", False,
+                     f"reference to {catalog.group(0)!r} -- system catalogs and "
+                     "the information schema are not queryable", ms)
+
+    cte_names = {m.group(1).lower() for m in CTE_RE.finditer(bare)}
+
+    unknown: list[str] = []
+    for m in CALL_RE.finditer(bare):
+        name = m.group(1).lower()
+        if name in NON_CALL_KEYWORDS or name in ALLOWED_FUNCTIONS or name in cte_names:
+            continue
+        # An identifier directly after a closing paren is a derived-table alias
+        # carrying a column list -- `(SELECT ...) t (a, b)` -- not a call.
+        prefix = bare[:m.start()].rstrip()
+        if prefix.endswith(")"):
+            continue
+        unknown.append(name)
+
+    ms = (time.perf_counter() - t0) * 1000
+    if unknown:
+        names = ", ".join(sorted(set(unknown)))
+        return Stage("functions", False,
+                     f"function(s) not on the allowlist: {names} -- rewrite using "
+                     "standard aggregate, window, string, math or date functions", ms)
+    return Stage("functions", True, "all called functions allowed", ms)
 
 
 async def validate_cost(sql: str, max_cost: float = MAX_COST) -> tuple[Stage, float]:
@@ -314,10 +478,27 @@ def validate_result_shape(rows: list[dict], cols: list[str]) -> Stage:
 
 
 async def answer(question: str, provider: LLMProvider,
-                 max_attempts: int = 2) -> NL2SQLResult:
+                 max_attempts: int = 2, use_router: bool = True) -> NL2SQLResult:
+    """Answer a question, or decline before spending a model call on it.
+
+    `use_router` exists so the benchmark can run both ways against the same
+    cases. A claim that the router improved anything is only worth making if the
+    same suite has been measured without it -- see reports/eval/.
+    """
     started = time.perf_counter()
     result = NL2SQLResult(question=question, succeeded=False, provider=provider.name)
     feedback: str | None = None
+
+    if use_router:
+        routing = classify(question)
+        result.routing = routing.to_dict()
+        if not routing.should_generate_sql:
+            # Declining here is the answer, not an error. The reason and the
+            # clarification are what the UI shows, and no SQL is generated --
+            # which is also why an UNSUPPORTED question costs no quota.
+            result.failure_reason = routing.reason
+            result.total_duration_ms = (time.perf_counter() - started) * 1000
+            return result
 
     for n in range(1, max_attempts + 1):
         prompt = question if feedback is None else (
@@ -343,6 +524,13 @@ async def answer(question: str, provider: LLMProvider,
             continue
 
         s = validate_keywords(sql)
+        att.stages.append(s)
+        if not s.passed:
+            att.rejected_reason = s.detail
+            feedback = att.error_fed_back = s.detail
+            continue
+
+        s = validate_functions(sql)
         att.stages.append(s)
         if not s.passed:
             att.rejected_reason = s.detail

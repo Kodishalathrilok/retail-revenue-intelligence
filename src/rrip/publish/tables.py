@@ -293,3 +293,39 @@ CAUSAL_DDL = [
 # alternative; 18 is retained deliberately as the contaminated counter-example.
 CAUSAL_CAMPAIGNS = [26, 8, 18]
 CONTAMINATION = {26: 6.6, 8: 59.9, 18: 90.8}
+
+
+# ---------------------------------------------------------------------------
+# Forecasts.
+#
+# Precomputed for the same reason the causal results are, plus one specific to
+# this component: the hosted API has no models/ directory and cannot carry
+# scikit-learn inside a 250 MB serverless limit. Locally the forecasts are
+# already precomputed into models/forecast/serving.csv -- the publisher copies
+# those rows into Postgres rather than recomputing them, so the hosted tier and
+# the local tier serve numbers that are identical by construction rather than
+# by two implementations agreeing.
+#
+# pub_forecast stores the FULL response payload as JSON per department-week.
+# That is denormalised on purpose: the payload includes a nested interval
+# block, a confidence tier with its reasons, and an explanation with its
+# contributors, and reassembling that shape from columns on the hosted side
+# would be a second implementation of rrip.forecast.service.
+# ---------------------------------------------------------------------------
+
+FORECAST_DDL = [
+    """CREATE TABLE pub_forecast (
+           department text, week_no smallint, is_next_week boolean,
+           payload text,
+           PRIMARY KEY (department, week_no))""",
+    """CREATE TABLE pub_forecast_history (
+           department text, week_no smallint, split text,
+           actual numeric(14,2), prediction numeric(14,2),
+           lower_bound numeric(14,2), upper_bound numeric(14,2),
+           baseline_prediction numeric(14,2), model_version text,
+           PRIMARY KEY (department, week_no))""",
+    """CREATE TABLE pub_forecast_departments (
+           department text PRIMARY KEY, test_wape numeric(8,3),
+           servable boolean, trailing_scale_usd numeric(14,2))""",
+    """CREATE TABLE pub_forecast_summary (payload text)""",
+]

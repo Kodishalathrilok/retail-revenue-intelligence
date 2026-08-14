@@ -200,6 +200,8 @@ def run(dsn: str | None = None, local_only: bool = False) -> int:
         published = build_local(conn)
         console.print("\ncomputing causal results (statsmodels, not SQL)...\n")
         published += build_causal(conn)
+        console.print("\ncopying precomputed forecasts...\n")
+        published += build_forecast(conn)
         _manifest(conn, published)
     total = report(published)
 
@@ -297,4 +299,101 @@ def build_causal(conn: psycopg.Connection) -> list[Published]:
         Published("pub_causal_results", n, _size(conn, "pub_causal_results"), dt),
         Published("pub_causal_pretrend", pre_rows,
                   _size(conn, "pub_causal_pretrend"), 0.0),
+    ]
+
+
+def build_forecast(conn: psycopg.Connection) -> list[Published]:
+    """Copy the precomputed forecasts into the published tier.
+
+    NOTHING IS RECOMPUTED HERE. The rows come from the artifact that
+    `rrip forecast-train` wrote and that the local API already serves, so the
+    hosted tier returns numbers identical to the local one by construction.
+    Rebuilding them from the panel would be a second implementation, and two
+    implementations of the same forecast is one more than can be kept in
+    agreement.
+
+    Returns an empty list, with a warning, when no artifact exists. A publish
+    that fails because the optional forecasting component has not been trained
+    would block the whole aggregate tier over a component the rest of it does
+    not depend on.
+    """
+    import json
+    import time
+
+    from rrip.forecast import service as FS
+    from rrip.publish.tables import FORECAST_DDL
+
+    t0 = time.perf_counter()
+
+    try:
+        store = FS.load_store(force=True)
+    except FS.ForecastUnavailable as exc:
+        console.print(f"  [yellow]skipped[/yellow]: {exc}")
+        return []
+
+    with conn.cursor() as cur:
+        for name in ("pub_forecast", "pub_forecast_history",
+                     "pub_forecast_departments", "pub_forecast_summary"):
+            cur.execute(f"DROP TABLE IF EXISTS {name}")
+        for ddl in FORECAST_DDL:
+            cur.execute(ddl)
+    conn.commit()
+
+    next_week = store.observed_until_week + 1
+    per = store.metadata["metrics"]["test"].get("per_department", {})
+
+    payload_rows = history_rows = 0
+    with conn.cursor() as cur:
+        for dept in store.departments:
+            for week in store.weeks:
+                row = store.rows.get((dept, week))
+                if row is None:
+                    continue
+
+                try:
+                    payload = json.dumps(FS.forecast(dept, week))
+                except FS.ForecastRequestError as exc:
+                    # A refusal is published too. The hosted tier must decline
+                    # for the same reason and with the same code as local --
+                    # otherwise INSUFFICIENT_HISTORY becomes a 404 in
+                    # production and looks like a missing department.
+                    payload = json.dumps(exc.to_dict())
+
+                cur.execute(
+                    "INSERT INTO pub_forecast VALUES (%s,%s,%s,%s)",
+                    (dept, week, week == next_week, payload))
+                payload_rows += 1
+
+                cur.execute(
+                    "INSERT INTO pub_forecast_history VALUES "
+                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (dept, week, row["split"],
+                     None if row["actual"] != row["actual"] else row["actual"],
+                     row["prediction"], row["lower"], row["upper"],
+                     row["baseline_prediction"], store.version))
+                history_rows += 1
+
+            target = store.rows.get((dept, next_week))
+            cur.execute(
+                "INSERT INTO pub_forecast_departments VALUES (%s,%s,%s,%s)",
+                (dept,
+                 float(per[dept]["wape"]) if dept in per else None,
+                 bool(target["servable"]) if target else False,
+                 float(target["scale_usd"]) if target else None))
+
+        cur.execute("INSERT INTO pub_forecast_summary VALUES (%s)",
+                    (json.dumps(FS.summary()),))
+    conn.commit()
+
+    dt = (time.perf_counter() - t0) * 1000
+    console.print(f"  {len(store.departments)} departments, {payload_rows} "
+                  f"forecast payloads, model {store.version}")
+    return [
+        Published("pub_forecast", payload_rows, _size(conn, "pub_forecast"), dt),
+        Published("pub_forecast_history", history_rows,
+                  _size(conn, "pub_forecast_history"), 0.0),
+        Published("pub_forecast_departments", len(store.departments),
+                  _size(conn, "pub_forecast_departments"), 0.0),
+        Published("pub_forecast_summary", 1,
+                  _size(conn, "pub_forecast_summary"), 0.0),
     ]

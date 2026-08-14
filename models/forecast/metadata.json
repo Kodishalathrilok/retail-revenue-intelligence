@@ -1,0 +1,2210 @@
+{
+  "model_type": "trailing_mean_4",
+  "hyperparameters": {
+    "window_weeks": 4,
+    "statistic": "mean",
+    "form": "mean of revenue in weeks t-3..t"
+  },
+  "random_seed": 20260814,
+  "trained_at": "2026-08-14T11:44:37+00:00",
+  "git_sha": "a9a2b6197a452fd024979a9dcc7b02c81536658b-dirty",
+  "contract_version": "forecast_v1",
+  "feature_version": "1.0.0",
+  "contract": {
+    "contract_version": "forecast_v1",
+    "target": {
+      "name": "weekly_department_revenue",
+      "expression": "sum(sales_value)",
+      "grain": "department x week",
+      "unit": "USD"
+    },
+    "horizon_weeks": 1,
+    "prediction_time": "end of week t; the target is week t+1",
+    "windows": {
+      "history_floor_week": 20,
+      "first_target_week": 28,
+      "last_target_week": 101,
+      "train": [
+        28,
+        73
+      ],
+      "validation": [
+        74,
+        87
+      ],
+      "test": [
+        88,
+        101
+      ],
+      "partial_weeks_excluded": [
+        1,
+        102
+      ]
+    },
+    "features": {
+      "version": "1.0.0",
+      "names": [
+        "rev_lag1_ratio",
+        "rev_lag2_ratio",
+        "rev_lag3_ratio",
+        "rev_lag4_ratio",
+        "roll4_ratio",
+        "rollmed8_ratio",
+        "rollstd8_ratio",
+        "momentum_ratio",
+        "trend_slope_ratio",
+        "zeros_in_window",
+        "panel_rev_lag1_ratio",
+        "panel_hh_lag1_ratio",
+        "panel_baskets_lag1_ratio",
+        "dept_share_lag1",
+        "dept_share_delta",
+        "promo_display_pct_lag1",
+        "promo_mailer_pct_lag1",
+        "promo_display_delta",
+        "promo_rows_ratio",
+        "campaigns_active_lag1",
+        "campaign_households_lag1",
+        "dept_volatility",
+        "dept_persistence",
+        "dept_log_scale"
+      ],
+      "scale_window_weeks": 8,
+      "seasonal_lag_weeks": 4
+    },
+    "missing_data_policy": "absent department-week means zero revenue, not missing",
+    "retraining_policy": "Static dataset: the panel ends at week 102 and does not grow, so the artifact is rebuilt only when code or contract changes. On a live feed the equivalent cadence is weekly, refitting both the model and the conformal residual quantiles on a rolling window.",
+    "notes": [
+      "Weeks 1 and 102 are partial (5 and 6 days) and are excluded entirely.",
+      "No feature reads a week before 20; 99.7% of the panel had transacted by then, and earlier weeks are enrolment rather than demand.",
+      "No feature reads week t+1, including promotion and campaign activity, even though a retailer would know next week's mailer.",
+      "Annual seasonality is not modelled: lag 52 exists for under a third of the window and scored worse than an 8-week trailing mean."
+    ]
+  },
+  "dataset": {
+    "weeks": [
+      20,
+      101
+    ],
+    "departments_in_source": 43,
+    "departments_qualifying": 23,
+    "qualifying_departments": [
+      "CHEF SHOPPE",
+      "COSMETICS",
+      "COUP/STR & MFG",
+      "DELI",
+      "DRUG GM",
+      "FLORAL",
+      "FROZEN GROCERY",
+      "GARDEN CENTER",
+      "GROCERY",
+      "KIOSK-GAS",
+      "MEAT",
+      "MEAT-PCKGD",
+      "MISC SALES TRAN",
+      "MISC. TRANS.",
+      "NUTRITION",
+      "PASTRY",
+      "PRODUCE",
+      "RESTAURANT",
+      "SALAD BAR",
+      "SEAFOOD",
+      "SEAFOOD-PCKGD",
+      "SPIRITS",
+      "TRAVEL & LEISUR"
+    ],
+    "rows": 3526,
+    "train_mean_weekly_revenue": 3762.54,
+    "inclusion_rule": "mean training-week revenue >= $1.00 and >= 50% of training weeks non-zero, evaluated on weeks 28-73 only"
+  },
+  "splits": {
+    "method": "chronological, no shuffling",
+    "blocks": [
+      {
+        "split": "train",
+        "weeks": [
+          28,
+          73
+        ],
+        "n_weeks": 46,
+        "rows": 1058,
+        "departments": 23,
+        "revenue_total": 3980765.01
+      },
+      {
+        "split": "validation",
+        "weeks": [
+          74,
+          87
+        ],
+        "n_weeks": 14,
+        "rows": 322,
+        "departments": 23,
+        "revenue_total": 1218139.29
+      },
+      {
+        "split": "test",
+        "weeks": [
+          88,
+          101
+        ],
+        "n_weeks": 14,
+        "rows": 322,
+        "departments": 23,
+        "revenue_total": 1295967.4
+      }
+    ],
+    "rolling_origin_folds": [
+      "fold 0: train 28-45 -> validate 46-52",
+      "fold 1: train 28-52 -> validate 53-59",
+      "fold 2: train 28-59 -> validate 60-66",
+      "fold 3: train 28-66 -> validate 67-73",
+      "fold 4: train 28-73 -> validate 74-80",
+      "fold 5: train 28-80 -> validate 81-87"
+    ],
+    "why_not_random": "Rolling features for target week w average weeks w-8..w-1, so a random split places a test row's target inside a training row's feature window. The inclusion rule and the normalisation scale are also fitted on training weeks, and under a random split those would be fitted on data surrounding the test weeks. A random split would additionally measure interpolation between known weeks, which is not the task a planner faces."
+  },
+  "department_stats": {
+    "fitted_on_weeks": [
+      28,
+      73
+    ],
+    "departments": [
+      "CHEF SHOPPE",
+      "COSMETICS",
+      "COUP/STR & MFG",
+      "DELI",
+      "DRUG GM",
+      "FLORAL",
+      "FROZEN GROCERY",
+      "GARDEN CENTER",
+      "GROCERY",
+      "KIOSK-GAS",
+      "MEAT",
+      "MEAT-PCKGD",
+      "MISC SALES TRAN",
+      "MISC. TRANS.",
+      "NUTRITION",
+      "PASTRY",
+      "PRODUCE",
+      "RESTAURANT",
+      "SALAD BAR",
+      "SEAFOOD",
+      "SEAFOOD-PCKGD",
+      "SPIRITS",
+      "TRAVEL & LEISUR"
+    ],
+    "volatility": {
+      "CHEF SHOPPE": 1.472849,
+      "COSMETICS": 0.241478,
+      "COUP/STR & MFG": 0.539707,
+      "DELI": 0.110772,
+      "DRUG GM": 0.079,
+      "FLORAL": 0.638813,
+      "FROZEN GROCERY": 0.776582,
+      "GARDEN CENTER": 1.48894,
+      "GROCERY": 0.066367,
+      "KIOSK-GAS": 0.1855,
+      "MEAT": 0.106899,
+      "MEAT-PCKGD": 0.136641,
+      "MISC SALES TRAN": 0.252034,
+      "MISC. TRANS.": 1.658299,
+      "NUTRITION": 0.13609,
+      "PASTRY": 0.130691,
+      "PRODUCE": 0.116688,
+      "RESTAURANT": 0.664031,
+      "SALAD BAR": 0.225451,
+      "SEAFOOD": 0.289239,
+      "SEAFOOD-PCKGD": 0.271796,
+      "SPIRITS": 0.312067,
+      "TRAVEL & LEISUR": 0.856857
+    },
+    "persistence": {
+      "CHEF SHOPPE": 0.889167,
+      "COSMETICS": -0.016435,
+      "COUP/STR & MFG": 0.008191,
+      "DELI": 0.328643,
+      "DRUG GM": 0.246634,
+      "FLORAL": 0.098802,
+      "FROZEN GROCERY": 0.235769,
+      "GARDEN CENTER": 0.63081,
+      "GROCERY": 0.012068,
+      "KIOSK-GAS": 0.750557,
+      "MEAT": -0.104548,
+      "MEAT-PCKGD": 0.017555,
+      "MISC SALES TRAN": 0.251993,
+      "MISC. TRANS.": -0.099064,
+      "NUTRITION": 0.266847,
+      "PASTRY": 0.021878,
+      "PRODUCE": 0.51859,
+      "RESTAURANT": 0.07052,
+      "SALAD BAR": 0.420606,
+      "SEAFOOD": -0.066252,
+      "SEAFOOD-PCKGD": 0.33795,
+      "SPIRITS": 0.405212,
+      "TRAVEL & LEISUR": 0.532975
+    },
+    "log_scale": {
+      "CHEF SHOPPE": 1.325984,
+      "COSMETICS": 2.538289,
+      "COUP/STR & MFG": 1.077968,
+      "DELI": 3.440698,
+      "DRUG GM": 4.049706,
+      "FLORAL": 2.641611,
+      "FROZEN GROCERY": 0.768284,
+      "GARDEN CENTER": 2.012692,
+      "GROCERY": 4.640544,
+      "KIOSK-GAS": 3.791423,
+      "MEAT": 3.773459,
+      "MEAT-PCKGD": 3.645059,
+      "MISC SALES TRAN": 3.108923,
+      "MISC. TRANS.": 2.074467,
+      "NUTRITION": 3.011394,
+      "PASTRY": 3.119781,
+      "PRODUCE": 3.780372,
+      "RESTAURANT": 1.307329,
+      "SALAD BAR": 2.514596,
+      "SEAFOOD": 2.510806,
+      "SEAFOOD-PCKGD": 2.837602,
+      "SPIRITS": 2.3771,
+      "TRAVEL & LEISUR": 1.317755
+    }
+  },
+  "selection": {
+    "method": "rolling-origin cross-validation on train+validation",
+    "folds": [
+      "fold 0: train 28-45 -> validate 46-52",
+      "fold 1: train 28-52 -> validate 53-59",
+      "fold 2: train 28-59 -> validate 60-66",
+      "fold 3: train 28-66 -> validate 67-73",
+      "fold 4: train 28-73 -> validate 74-80",
+      "fold 5: train 28-80 -> validate 81-87"
+    ],
+    "candidates": [
+      {
+        "candidate": "naive",
+        "family": "baseline",
+        "n": 966,
+        "mae": 354.863,
+        "rmse": 944.565,
+        "wape": 9.2947,
+        "smape": 31.0344,
+        "bias": -12.109,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "seasonal_naive_4",
+        "family": "baseline",
+        "n": 966,
+        "mae": 314.025,
+        "rmse": 716.382,
+        "wape": 8.2251,
+        "smape": 33.0939,
+        "bias": -22.068,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "trailing_mean_8",
+        "family": "baseline",
+        "n": 966,
+        "mae": 279.734,
+        "rmse": 722.938,
+        "wape": 7.3269,
+        "smape": 28.2665,
+        "bias": -20.551,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "trailing_median_8",
+        "family": "baseline",
+        "n": 966,
+        "mae": 287.642,
+        "rmse": 752.218,
+        "wape": 7.534,
+        "smape": 28.2113,
+        "bias": -66.366,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "trailing_mean_4",
+        "family": "baseline",
+        "n": 966,
+        "mae": 273.48,
+        "rmse": 719.451,
+        "wape": 7.1631,
+        "smape": 26.8667,
+        "bias": -19.869,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "drift",
+        "family": "baseline",
+        "n": 966,
+        "mae": 376.369,
+        "rmse": 1000.387,
+        "wape": 9.858,
+        "smape": 32.7704,
+        "bias": -11.129,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "ridge(alpha=0.3)",
+        "family": "RidgeRatio",
+        "hyperparameters": {
+          "alpha": 0.3,
+          "clip_percentiles": [
+            1.0,
+            99.0
+          ]
+        },
+        "n": 966,
+        "mae": 286.269,
+        "rmse": 732.728,
+        "wape": 7.4981,
+        "smape": 29.4398,
+        "bias": 27.751,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "ridge(alpha=1.0)",
+        "family": "RidgeRatio",
+        "hyperparameters": {
+          "alpha": 1.0,
+          "clip_percentiles": [
+            1.0,
+            99.0
+          ]
+        },
+        "n": 966,
+        "mae": 286.235,
+        "rmse": 732.694,
+        "wape": 7.4972,
+        "smape": 29.4529,
+        "bias": 27.808,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "ridge(alpha=3.0)",
+        "family": "RidgeRatio",
+        "hyperparameters": {
+          "alpha": 3.0,
+          "clip_percentiles": [
+            1.0,
+            99.0
+          ]
+        },
+        "n": 966,
+        "mae": 286.139,
+        "rmse": 732.603,
+        "wape": 7.4946,
+        "smape": 29.4687,
+        "bias": 27.973,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "ridge(alpha=10.0)",
+        "family": "RidgeRatio",
+        "hyperparameters": {
+          "alpha": 10.0,
+          "clip_percentiles": [
+            1.0,
+            99.0
+          ]
+        },
+        "n": 966,
+        "mae": 285.884,
+        "rmse": 732.339,
+        "wape": 7.488,
+        "smape": 29.317,
+        "bias": 28.537,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "ridge(alpha=30.0)",
+        "family": "RidgeRatio",
+        "hyperparameters": {
+          "alpha": 30.0,
+          "clip_percentiles": [
+            1.0,
+            99.0
+          ]
+        },
+        "n": 966,
+        "mae": 285.478,
+        "rmse": 731.923,
+        "wape": 7.4773,
+        "smape": 29.0691,
+        "bias": 29.786,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "hgb(lr=0.05,leaves=7,min_leaf=40)",
+        "family": "GradientBoostRatio",
+        "hyperparameters": {
+          "max_depth": 3,
+          "max_leaf_nodes": 7,
+          "learning_rate": 0.05,
+          "max_iter": 300,
+          "min_samples_leaf": 40,
+          "l2_regularization": 1.0,
+          "loss": "absolute_error",
+          "random_state": 20260814
+        },
+        "n": 966,
+        "mae": 258.273,
+        "rmse": 631.191,
+        "wape": 6.7648,
+        "smape": 28.1191,
+        "bias": -9.49,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "hgb(lr=0.05,leaves=15,min_leaf=20)",
+        "family": "GradientBoostRatio",
+        "hyperparameters": {
+          "max_depth": 3,
+          "max_leaf_nodes": 15,
+          "learning_rate": 0.05,
+          "max_iter": 300,
+          "min_samples_leaf": 20,
+          "l2_regularization": 1.0,
+          "loss": "absolute_error",
+          "random_state": 20260814
+        },
+        "n": 966,
+        "mae": 260.247,
+        "rmse": 638.346,
+        "wape": 6.8165,
+        "smape": 28.1815,
+        "bias": -6.082,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "hgb(lr=0.02,leaves=7,min_leaf=40)",
+        "family": "GradientBoostRatio",
+        "hyperparameters": {
+          "max_depth": 3,
+          "max_leaf_nodes": 7,
+          "learning_rate": 0.02,
+          "max_iter": 300,
+          "min_samples_leaf": 40,
+          "l2_regularization": 1.0,
+          "loss": "absolute_error",
+          "random_state": 20260814
+        },
+        "n": 966,
+        "mae": 255.644,
+        "rmse": 633.48,
+        "wape": 6.6959,
+        "smape": 28.1254,
+        "bias": -6.312,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "rf(depth=6,min_leaf=20)",
+        "family": "RandomForestRatio",
+        "hyperparameters": {
+          "n_estimators": 400,
+          "max_depth": 6,
+          "min_samples_leaf": 20,
+          "max_features": 0.5,
+          "random_state": 20260814
+        },
+        "n": 966,
+        "mae": 263.559,
+        "rmse": 657.861,
+        "wape": 6.9032,
+        "smape": 28.1642,
+        "bias": -3.815,
+        "actual_total": 3688097.79
+      },
+      {
+        "candidate": "rf(depth=10,min_leaf=10)",
+        "family": "RandomForestRatio",
+        "hyperparameters": {
+          "n_estimators": 400,
+          "max_depth": 10,
+          "min_samples_leaf": 10,
+          "max_features": 0.5,
+          "random_state": 20260814
+        },
+        "n": 966,
+        "mae": 267.515,
+        "rmse": 660.167,
+        "wape": 7.0069,
+        "smape": 28.2877,
+        "bias": 2.476,
+        "actual_total": 3688097.79
+      }
+    ],
+    "best_baseline": "trailing_mean_4",
+    "best_baseline_wape": 7.1631,
+    "selected": "hgb(lr=0.02,leaves=7,min_leaf=40)",
+    "selected_wape": 6.6959
+  },
+  "metrics": {
+    "test": {
+      "name": "trailing_mean_4",
+      "scores": {
+        "n": 322,
+        "mae": 396.519,
+        "rmse": 1035.321,
+        "wape": 9.852,
+        "smape": 29.8128,
+        "bias": -9.595,
+        "actual_total": 1295967.4
+      },
+      "baseline_name": "trailing_mean_4",
+      "baseline_scores": {
+        "n": 322,
+        "mae": 396.519,
+        "rmse": 1035.321,
+        "wape": 9.852,
+        "smape": 29.8128,
+        "bias": -9.595,
+        "actual_total": 1295967.4
+      },
+      "wape_improvement_pct": 0.0,
+      "mae_improvement_pct": 0.0,
+      "per_department": {
+        "CHEF SHOPPE": {
+          "n": 14,
+          "mae": 10.642,
+          "rmse": 12.627,
+          "wape": 26.5873,
+          "smape": 27.6318,
+          "bias": -4.128,
+          "actual_total": 560.37
+        },
+        "COSMETICS": {
+          "n": 14,
+          "mae": 112.287,
+          "rmse": 146.79,
+          "wape": 27.8874,
+          "smape": 26.8103,
+          "bias": -0.197,
+          "actual_total": 5637.02
+        },
+        "COUP/STR & MFG": {
+          "n": 14,
+          "mae": 7.881,
+          "rmse": 9.763,
+          "wape": 67.9121,
+          "smape": 69.1068,
+          "bias": 0.897,
+          "actual_total": 162.46
+        },
+        "DELI": {
+          "n": 14,
+          "mae": 396.115,
+          "rmse": 561.252,
+          "wape": 13.214,
+          "smape": 12.637,
+          "bias": -0.482,
+          "actual_total": 41967.79
+        },
+        "DRUG GM": {
+          "n": 14,
+          "mae": 1275.076,
+          "rmse": 1550.257,
+          "wape": 10.151,
+          "smape": 9.9828,
+          "bias": -85.502,
+          "actual_total": 175854.56
+        },
+        "FLORAL": {
+          "n": 14,
+          "mae": 284.591,
+          "rmse": 470.33,
+          "wape": 60.5354,
+          "smape": 52.3896,
+          "bias": -81.933,
+          "actual_total": 6581.72
+        },
+        "FROZEN GROCERY": {
+          "n": 14,
+          "mae": 6.539,
+          "rmse": 7.999,
+          "wape": 53.6954,
+          "smape": 57.0959,
+          "bias": 1.109,
+          "actual_total": 170.48
+        },
+        "GARDEN CENTER": {
+          "n": 14,
+          "mae": 36.358,
+          "rmse": 71.043,
+          "wape": 117.0886,
+          "smape": 83.4991,
+          "bias": 4.973,
+          "actual_total": 434.72
+        },
+        "GROCERY": {
+          "n": 14,
+          "mae": 3363.053,
+          "rmse": 4349.794,
+          "wape": 7.0425,
+          "smape": 6.9946,
+          "bias": -113.598,
+          "actual_total": 668549.81
+        },
+        "KIOSK-GAS": {
+          "n": 14,
+          "mae": 483.25,
+          "rmse": 567.786,
+          "wape": 8.5486,
+          "smape": 8.6801,
+          "bias": -7.828,
+          "actual_total": 79141.34
+        },
+        "MEAT": {
+          "n": 14,
+          "mae": 689.61,
+          "rmse": 790.574,
+          "wape": 11.5252,
+          "smape": 11.3257,
+          "bias": 126.892,
+          "actual_total": 83768.61
+        },
+        "MEAT-PCKGD": {
+          "n": 14,
+          "mae": 504.854,
+          "rmse": 686.693,
+          "wape": 11.2268,
+          "smape": 11.1137,
+          "bias": -28.087,
+          "actual_total": 62955.94
+        },
+        "MISC SALES TRAN": {
+          "n": 14,
+          "mae": 490.274,
+          "rmse": 749.529,
+          "wape": 32.5571,
+          "smape": 27.9106,
+          "bias": 69.808,
+          "actual_total": 21082.5
+        },
+        "MISC. TRANS.": {
+          "n": 14,
+          "mae": 97.596,
+          "rmse": 116.796,
+          "wape": 65.3939,
+          "smape": 62.4205,
+          "bias": 9.842,
+          "actual_total": 2089.41
+        },
+        "NUTRITION": {
+          "n": 14,
+          "mae": 138.116,
+          "rmse": 156.742,
+          "wape": 11.552,
+          "smape": 11.9535,
+          "bias": -30.653,
+          "actual_total": 16738.47
+        },
+        "PASTRY": {
+          "n": 14,
+          "mae": 239.897,
+          "rmse": 282.86,
+          "wape": 17.6978,
+          "smape": 17.3624,
+          "bias": 25.837,
+          "actual_total": 18977.28
+        },
+        "PRODUCE": {
+          "n": 14,
+          "mae": 606.65,
+          "rmse": 779.054,
+          "wape": 9.8976,
+          "smape": 9.9813,
+          "bias": -24.084,
+          "actual_total": 85809.59
+        },
+        "RESTAURANT": {
+          "n": 14,
+          "mae": 17.591,
+          "rmse": 21.38,
+          "wape": 48.5032,
+          "smape": 52.1176,
+          "bias": -6.34,
+          "actual_total": 507.75
+        },
+        "SALAD BAR": {
+          "n": 14,
+          "mae": 47.542,
+          "rmse": 56.144,
+          "wape": 13.636,
+          "smape": 14.0309,
+          "bias": 1.537,
+          "actual_total": 4881.15
+        },
+        "SEAFOOD": {
+          "n": 14,
+          "mae": 58.29,
+          "rmse": 69.964,
+          "wape": 16.458,
+          "smape": 16.6205,
+          "bias": -31.843,
+          "actual_total": 4958.41
+        },
+        "SEAFOOD-PCKGD": {
+          "n": 14,
+          "mae": 164.611,
+          "rmse": 204.284,
+          "wape": 20.5593,
+          "smape": 20.3727,
+          "bias": -41.471,
+          "actual_total": 11209.33
+        },
+        "SPIRITS": {
+          "n": 14,
+          "mae": 77.412,
+          "rmse": 100.052,
+          "wape": 30.3834,
+          "smape": 29.0008,
+          "bias": -6.203,
+          "actual_total": 3566.99
+        },
+        "TRAVEL & LEISUR": {
+          "n": 14,
+          "mae": 11.705,
+          "rmse": 14.954,
+          "wape": 45.3069,
+          "smape": 46.6569,
+          "bias": 0.769,
+          "actual_total": 361.7
+        }
+      }
+    },
+    "test_baselines": {
+      "naive": {
+        "n": 322,
+        "mae": 487.236,
+        "rmse": 1402.592,
+        "wape": 12.106,
+        "smape": 33.9299,
+        "bias": 21.685,
+        "actual_total": 1295967.4
+      },
+      "seasonal_naive_4": {
+        "n": 322,
+        "mae": 483.876,
+        "rmse": 1204.236,
+        "wape": 12.0225,
+        "smape": 35.3432,
+        "bias": -50.763,
+        "actual_total": 1295967.4
+      },
+      "trailing_mean_8": {
+        "n": 322,
+        "mae": 378.432,
+        "rmse": 971.63,
+        "wape": 9.4026,
+        "smape": 33.2935,
+        "bias": -43.132,
+        "actual_total": 1295967.4
+      },
+      "trailing_median_8": {
+        "n": 322,
+        "mae": 373.407,
+        "rmse": 978.78,
+        "wape": 9.2778,
+        "smape": 30.4465,
+        "bias": -91.951,
+        "actual_total": 1295967.4
+      },
+      "trailing_mean_4": {
+        "n": 322,
+        "mae": 396.519,
+        "rmse": 1035.321,
+        "wape": 9.852,
+        "smape": 29.8128,
+        "bias": -9.595,
+        "actual_total": 1295967.4
+      },
+      "drift": {
+        "n": 322,
+        "mae": 507.393,
+        "rmse": 1451.199,
+        "wape": 12.6068,
+        "smape": 35.3518,
+        "bias": 38.77,
+        "actual_total": 1295967.4
+      },
+      "__challenger_model__": {
+        "n": 322,
+        "mae": 396.693,
+        "rmse": 1017.081,
+        "wape": 9.8564,
+        "smape": 33.1787,
+        "bias": -11.66,
+        "actual_total": 1295967.4,
+        "note": "the fitted challenger, hgb(lr=0.02,leaves=7,min_leaf=40)"
+      },
+      "seasonal_naive_52": {
+        "n": 322,
+        "mae": 356.21,
+        "rmse": 1089.867,
+        "wape": 8.8505,
+        "smape": 37.3069,
+        "bias": -266.629,
+        "actual_total": 1295967.4,
+        "note": "Lag 52. Cannot be a feature -- a 52-week lookback for the first target week would reach week -24 -- but it is computable on the test weeks, so it is scored here rather than dismissed."
+      }
+    },
+    "validation_point_model": {
+      "n": 322,
+      "mae": 233.622,
+      "rmse": 557.116,
+      "wape": 6.1755,
+      "smape": 26.1489,
+      "bias": -0.066,
+      "actual_total": 1218139.29
+    },
+    "validation_point_deployed": {
+      "n": 322,
+      "mae": 248.702,
+      "rmse": 613.716,
+      "wape": 6.5741,
+      "smape": 26.4276,
+      "bias": -9.623,
+      "actual_total": 1218139.29
+    },
+    "diebold_mariano_pairwise": {
+      "model_vs_naive": {
+        "statistic": -2.1833,
+        "p_value": 0.02974,
+        "mean_loss_diff": -90.5423,
+        "n": 322
+      },
+      "model_vs_seasonal_naive_4": {
+        "statistic": -2.815,
+        "p_value": 0.00518,
+        "mean_loss_diff": -87.1821,
+        "n": 322
+      },
+      "model_vs_trailing_mean_8": {
+        "statistic": 1.1314,
+        "p_value": 0.25873,
+        "mean_loss_diff": 18.2616,
+        "n": 322
+      },
+      "model_vs_trailing_median_8": {
+        "statistic": 1.3771,
+        "p_value": 0.16945,
+        "mean_loss_diff": 23.2861,
+        "n": 322
+      },
+      "model_vs_trailing_mean_4": {
+        "statistic": 0.0097,
+        "p_value": 0.99227,
+        "mean_loss_diff": 0.1744,
+        "n": 322
+      },
+      "model_vs_drift": {
+        "statistic": -2.5291,
+        "p_value": 0.01191,
+        "mean_loss_diff": -110.6997,
+        "n": 322
+      }
+    },
+    "macro_wape_test": 31.6243
+  },
+  "conformal": {
+    "calibration": {
+      "0.80": {
+        "level": 0.8,
+        "lower_q": -0.423627,
+        "upper_q": 0.432694,
+        "n_calibration": 322,
+        "calibration_weeks": [
+          74,
+          87
+        ],
+        "method": "split conformal on signed scale-normalised residuals",
+        "kind": "prediction interval"
+      },
+      "0.95": {
+        "level": 0.95,
+        "lower_q": -0.70423,
+        "upper_q": 1.704653,
+        "n_calibration": 322,
+        "calibration_weeks": [
+          74,
+          87
+        ],
+        "method": "split conformal on signed scale-normalised residuals",
+        "kind": "prediction interval"
+      }
+    },
+    "test_coverage": {
+      "0.80": {
+        "nominal": 0.8,
+        "n": 322,
+        "coverage": 0.8075,
+        "mean_width": 3409.35,
+        "median_width": 374.79,
+        "mean_relative_width": 1.0278,
+        "below_lower": 28,
+        "above_upper": 34
+      },
+      "0.95": {
+        "nominal": 0.95,
+        "n": 322,
+        "coverage": 0.9472,
+        "mean_width": 9590.75,
+        "median_width": 1054.32,
+        "mean_relative_width": 2.8872,
+        "below_lower": 13,
+        "above_upper": 4
+      }
+    },
+    "calibrated_for": "trailing_mean_4"
+  },
+  "importance": [
+    {
+      "feature": "rev_lag4_ratio",
+      "label": "Revenue four weeks ago (seasonal lag)",
+      "importance": 28.144147,
+      "std": 12.036291
+    },
+    {
+      "feature": "panel_hh_lag1_ratio",
+      "label": "Store-wide active households last week",
+      "importance": 7.792569,
+      "std": 3.931222
+    },
+    {
+      "feature": "dept_persistence",
+      "label": "How much this department follows last week",
+      "importance": 6.466652,
+      "std": 2.172141
+    },
+    {
+      "feature": "rev_lag3_ratio",
+      "label": "Revenue three weeks ago",
+      "importance": 5.795425,
+      "std": 3.42061
+    },
+    {
+      "feature": "rev_lag1_ratio",
+      "label": "Last week's revenue",
+      "importance": 4.242132,
+      "std": 4.077989
+    },
+    {
+      "feature": "panel_rev_lag1_ratio",
+      "label": "Store-wide revenue last week",
+      "importance": 3.969325,
+      "std": 3.94772
+    },
+    {
+      "feature": "dept_share_delta",
+      "label": "Change in department share",
+      "importance": 3.790047,
+      "std": 0.958096
+    },
+    {
+      "feature": "promo_mailer_pct_lag1",
+      "label": "Products in the mailer last week",
+      "importance": 2.676085,
+      "std": 2.215013
+    },
+    {
+      "feature": "rollmed8_ratio",
+      "label": "8-week median",
+      "importance": 2.476601,
+      "std": 4.364837
+    },
+    {
+      "feature": "rollstd8_ratio",
+      "label": "8-week volatility",
+      "importance": 2.144184,
+      "std": 0.765545
+    },
+    {
+      "feature": "rev_lag2_ratio",
+      "label": "Revenue two weeks ago",
+      "importance": 1.819784,
+      "std": 2.045419
+    },
+    {
+      "feature": "promo_display_delta",
+      "label": "Change in display promotion",
+      "importance": 1.701129,
+      "std": 0.732772
+    },
+    {
+      "feature": "dept_share_lag1",
+      "label": "Department share of revenue last week",
+      "importance": 1.504516,
+      "std": 1.56028
+    },
+    {
+      "feature": "promo_rows_ratio",
+      "label": "Promoted product count vs its 8-week norm",
+      "importance": 0.671694,
+      "std": 2.049099
+    },
+    {
+      "feature": "roll4_ratio",
+      "label": "4-week average",
+      "importance": 0.515345,
+      "std": 2.636816
+    },
+    {
+      "feature": "promo_display_pct_lag1",
+      "label": "Products on in-store display last week",
+      "importance": 0.474474,
+      "std": 0.882363
+    },
+    {
+      "feature": "dept_volatility",
+      "label": "How volatile this department normally is",
+      "importance": 0.128598,
+      "std": 0.188932
+    },
+    {
+      "feature": "zeros_in_window",
+      "label": "Weeks with no sales in the last 8",
+      "importance": 0.0,
+      "std": 0.0
+    },
+    {
+      "feature": "dept_log_scale",
+      "label": "Department size",
+      "importance": 0.0,
+      "std": 0.0
+    },
+    {
+      "feature": "momentum_ratio",
+      "label": "Short-term momentum (4-week vs 8-week)",
+      "importance": -0.022346,
+      "std": 0.287607
+    },
+    {
+      "feature": "campaign_households_lag1",
+      "label": "Households enrolled in a live campaign",
+      "importance": -0.238301,
+      "std": 0.126157
+    },
+    {
+      "feature": "trend_slope_ratio",
+      "label": "8-week trend",
+      "importance": -0.423484,
+      "std": 0.502933
+    },
+    {
+      "feature": "campaigns_active_lag1",
+      "label": "Marketing campaigns running last week",
+      "importance": -0.752323,
+      "std": 0.77408
+    },
+    {
+      "feature": "panel_baskets_lag1_ratio",
+      "label": "Store-wide baskets last week",
+      "importance": -3.129881,
+      "std": 1.267831
+    }
+  ],
+  "reference_values": {
+    "rev_lag1_ratio": 0.982698315873114,
+    "rev_lag2_ratio": 0.973583696238147,
+    "rev_lag3_ratio": 0.9789650375717307,
+    "rev_lag4_ratio": 0.9780990716396402,
+    "roll4_ratio": 1.0022983739607012,
+    "rollmed8_ratio": 0.981664922743053,
+    "rollstd8_ratio": 0.19654518774559093,
+    "momentum_ratio": 0.0024828742379500186,
+    "trend_slope_ratio": 0.0038451344906318876,
+    "zeros_in_window": 0.0,
+    "panel_rev_lag1_ratio": 1.0006323062539781,
+    "panel_hh_lag1_ratio": 0.9978456392508235,
+    "panel_baskets_lag1_ratio": 1.000773715053795,
+    "dept_share_lag1": 0.005346934899128693,
+    "dept_share_delta": -2.9769504254767322e-05,
+    "promo_display_pct_lag1": 0.2984465750678429,
+    "promo_mailer_pct_lag1": 0.454723658727089,
+    "promo_display_delta": 0.0,
+    "promo_rows_ratio": 0.8577057572734327,
+    "campaigns_active_lag1": 2.0,
+    "campaign_households_lag1": 344.0,
+    "dept_volatility": 0.2520338828898252,
+    "dept_persistence": 0.24663365374814858,
+    "dept_log_scale": 2.6416111800418554
+  },
+  "deployment": {
+    "rule": "The fitted model is deployed only if BOTH hold on the untouched test weeks: (1) its WAPE is lower than the baseline selected on validation, and (2) a Diebold-Mariano test on absolute-error loss rejects equal accuracy at p < 0.05 in the model's favour. Otherwise the baseline is deployed and the model is retained as a measured challenger. Condition (2) exists because at n=322 a WAPE difference of a few hundredths of a point is not a result.",
+    "alpha": 0.05,
+    "model": "hgb(lr=0.02,leaves=7,min_leaf=40)",
+    "baseline": "trailing_mean_4",
+    "model_scores": {
+      "n": 322,
+      "mae": 396.693,
+      "rmse": 1017.081,
+      "wape": 9.8564,
+      "smape": 33.1787,
+      "bias": -11.66,
+      "actual_total": 1295967.4
+    },
+    "baseline_scores": {
+      "n": 322,
+      "mae": 396.519,
+      "rmse": 1035.321,
+      "wape": 9.852,
+      "smape": 29.8128,
+      "bias": -9.595,
+      "actual_total": 1295967.4
+    },
+    "diebold_mariano": {
+      "statistic": 0.0097,
+      "p_value": 0.99227,
+      "mean_loss_diff": 0.1744,
+      "n": 322
+    },
+    "model_wape_lower": false,
+    "difference_significant": false,
+    "deployed_predictor": "trailing_mean_4",
+    "deployed_kind": "baseline",
+    "rationale": "hgb(lr=0.02,leaves=7,min_leaf=40) did not beat trailing_mean_4 on the test weeks (WAPE 9.86% against 9.85%; Diebold-Mariano p = 0.99227). The baseline is deployed. This is a valid outcome and it is reported as measured rather than worked around -- a simpler predictor that performs as well is the better system."
+  },
+  "challenger": {
+    "name": "hgb(lr=0.02,leaves=7,min_leaf=40)",
+    "hyperparameters": {
+      "max_depth": 3,
+      "max_leaf_nodes": 7,
+      "learning_rate": 0.02,
+      "max_iter": 300,
+      "min_samples_leaf": 40,
+      "l2_regularization": 1.0,
+      "loss": "absolute_error",
+      "random_state": 20260814
+    },
+    "test_scores": {
+      "n": 322,
+      "mae": 396.693,
+      "rmse": 1017.081,
+      "wape": 9.8564,
+      "smape": 33.1787,
+      "bias": -11.66,
+      "actual_total": 1295967.4
+    }
+  },
+  "leakage_audit": {
+    "passed": true,
+    "n_checks": 6,
+    "checks": [
+      {
+        "name": "declared_cutoff",
+        "passed": true,
+        "detail": "no registered feature reads a week after the prediction cutoff",
+        "evidence": {
+          "n_features": 24,
+          "violations": []
+        }
+      },
+      {
+        "name": "history_floor",
+        "passed": true,
+        "detail": "earliest target week 28 reads back to week 20, at or after the floor 20",
+        "evidence": {
+          "deepest_offset": -7,
+          "oldest_week_read": 20,
+          "history_floor": 20
+        }
+      },
+      {
+        "name": "split_order",
+        "passed": true,
+        "detail": "train, validation and test are contiguous, ordered and non-overlapping, and no rolling-origin fold reaches the test window",
+        "evidence": {
+          "train": [
+            28,
+            73
+          ],
+          "validation": [
+            74,
+            87
+          ],
+          "test": [
+            88,
+            101
+          ]
+        }
+      },
+      {
+        "name": "fitted_scope",
+        "passed": true,
+        "detail": "department statistics fitted on weeks (28, 73), which is the training window",
+        "evidence": {
+          "fitted_on": [
+            28,
+            73
+          ],
+          "train_window": [
+            28,
+            73
+          ]
+        }
+      },
+      {
+        "name": "target_independence",
+        "passed": true,
+        "detail": "corrupting a week's revenue, promotions and campaigns changed no feature on the row whose target is that week",
+        "evidence": {
+          "probe_weeks": [
+            33,
+            60,
+            101
+          ],
+          "features_that_moved": {}
+        }
+      },
+      {
+        "name": "future_window",
+        "passed": true,
+        "detail": "features for target week 70 are identical whether built from the full panel or from a panel truncated at the cutoff",
+        "evidence": {
+          "probe_week": 70,
+          "differing_features": []
+        }
+      }
+    ],
+    "oracle_comparison": {
+      "strict": {
+        "n": 966,
+        "mae": 255.644,
+        "rmse": 633.48,
+        "wape": 6.6959,
+        "smape": 28.1254,
+        "bias": -6.312,
+        "actual_total": 3688097.79
+      },
+      "oracle": {
+        "n": 966,
+        "mae": 261.83,
+        "rmse": 656.854,
+        "wape": 6.8579,
+        "smape": 28.1066,
+        "bias": -8.564,
+        "actual_total": 3688097.79
+      },
+      "wape_advantage_of_leaking": -0.162,
+      "relative_advantage_pct": -2.42,
+      "interpretation": "The oracle variant reads promotion and campaign activity in the week it is predicting. It is not servable and is never saved. The gap is what the strict cutoff costs -- and what a leaking implementation would have reported as model quality."
+    }
+  },
+  "robustness": {
+    "time_drift": {
+      "blocks": [
+        {
+          "weeks": [
+            88,
+            92
+          ],
+          "n": 115,
+          "mae": 391.347,
+          "rmse": 1097.926,
+          "wape": 9.4545,
+          "smape": 28.4095,
+          "bias": -182.166,
+          "actual_total": 476015.89
+        },
+        {
+          "weeks": [
+            93,
+            97
+          ],
+          "n": 115,
+          "mae": 371.498,
+          "rmse": 867.922,
+          "wape": 9.6603,
+          "smape": 32.9912,
+          "bias": 216.014,
+          "actual_total": 442244.15
+        },
+        {
+          "weeks": [
+            98,
+            101
+          ],
+          "n": 92,
+          "mae": 434.26,
+          "rmse": 1141.579,
+          "wape": 10.5775,
+          "smape": 27.594,
+          "bias": -75.892,
+          "actual_total": 377707.36
+        }
+      ],
+      "first_block_wape": 9.4545,
+      "last_block_wape": 10.5775,
+      "drift_pp": 1.123,
+      "note": "Positive drift means later weeks are forecast less accurately, which is what a model going stale looks like. At 14 test weeks this is a direction, not a trend estimate."
+    },
+    "department_variation": {
+      "departments": [
+        {
+          "department": "GROCERY",
+          "n": 14,
+          "mae": 3363.053,
+          "rmse": 4349.794,
+          "wape": 7.0425,
+          "smape": 6.9946,
+          "bias": -113.598,
+          "actual_total": 668549.81,
+          "error_share": 0.3688,
+          "revenue_share": 0.5159
+        },
+        {
+          "department": "DRUG GM",
+          "n": 14,
+          "mae": 1275.076,
+          "rmse": 1550.257,
+          "wape": 10.151,
+          "smape": 9.9828,
+          "bias": -85.502,
+          "actual_total": 175854.56,
+          "error_share": 0.1398,
+          "revenue_share": 0.1357
+        },
+        {
+          "department": "MEAT",
+          "n": 14,
+          "mae": 689.61,
+          "rmse": 790.574,
+          "wape": 11.5252,
+          "smape": 11.3257,
+          "bias": 126.892,
+          "actual_total": 83768.61,
+          "error_share": 0.0756,
+          "revenue_share": 0.0646
+        },
+        {
+          "department": "PRODUCE",
+          "n": 14,
+          "mae": 606.65,
+          "rmse": 779.054,
+          "wape": 9.8976,
+          "smape": 9.9813,
+          "bias": -24.084,
+          "actual_total": 85809.59,
+          "error_share": 0.0665,
+          "revenue_share": 0.0662
+        },
+        {
+          "department": "MEAT-PCKGD",
+          "n": 14,
+          "mae": 504.854,
+          "rmse": 686.693,
+          "wape": 11.2268,
+          "smape": 11.1137,
+          "bias": -28.087,
+          "actual_total": 62955.94,
+          "error_share": 0.0554,
+          "revenue_share": 0.0486
+        },
+        {
+          "department": "MISC SALES TRAN",
+          "n": 14,
+          "mae": 490.274,
+          "rmse": 749.529,
+          "wape": 32.5571,
+          "smape": 27.9106,
+          "bias": 69.808,
+          "actual_total": 21082.5,
+          "error_share": 0.0538,
+          "revenue_share": 0.0163
+        },
+        {
+          "department": "KIOSK-GAS",
+          "n": 14,
+          "mae": 483.25,
+          "rmse": 567.786,
+          "wape": 8.5486,
+          "smape": 8.6801,
+          "bias": -7.828,
+          "actual_total": 79141.34,
+          "error_share": 0.053,
+          "revenue_share": 0.0611
+        },
+        {
+          "department": "DELI",
+          "n": 14,
+          "mae": 396.115,
+          "rmse": 561.252,
+          "wape": 13.214,
+          "smape": 12.637,
+          "bias": -0.482,
+          "actual_total": 41967.79,
+          "error_share": 0.0434,
+          "revenue_share": 0.0324
+        },
+        {
+          "department": "FLORAL",
+          "n": 14,
+          "mae": 284.591,
+          "rmse": 470.33,
+          "wape": 60.5354,
+          "smape": 52.3896,
+          "bias": -81.933,
+          "actual_total": 6581.72,
+          "error_share": 0.0312,
+          "revenue_share": 0.0051
+        },
+        {
+          "department": "PASTRY",
+          "n": 14,
+          "mae": 239.897,
+          "rmse": 282.86,
+          "wape": 17.6978,
+          "smape": 17.3624,
+          "bias": 25.837,
+          "actual_total": 18977.28,
+          "error_share": 0.0263,
+          "revenue_share": 0.0146
+        },
+        {
+          "department": "SEAFOOD-PCKGD",
+          "n": 14,
+          "mae": 164.611,
+          "rmse": 204.284,
+          "wape": 20.5593,
+          "smape": 20.3727,
+          "bias": -41.471,
+          "actual_total": 11209.33,
+          "error_share": 0.018,
+          "revenue_share": 0.0086
+        },
+        {
+          "department": "NUTRITION",
+          "n": 14,
+          "mae": 138.116,
+          "rmse": 156.742,
+          "wape": 11.552,
+          "smape": 11.9535,
+          "bias": -30.653,
+          "actual_total": 16738.47,
+          "error_share": 0.0151,
+          "revenue_share": 0.0129
+        },
+        {
+          "department": "COSMETICS",
+          "n": 14,
+          "mae": 112.287,
+          "rmse": 146.79,
+          "wape": 27.8874,
+          "smape": 26.8103,
+          "bias": -0.197,
+          "actual_total": 5637.02,
+          "error_share": 0.0123,
+          "revenue_share": 0.0043
+        },
+        {
+          "department": "MISC. TRANS.",
+          "n": 14,
+          "mae": 97.596,
+          "rmse": 116.796,
+          "wape": 65.3939,
+          "smape": 62.4205,
+          "bias": 9.842,
+          "actual_total": 2089.41,
+          "error_share": 0.0107,
+          "revenue_share": 0.0016
+        },
+        {
+          "department": "SPIRITS",
+          "n": 14,
+          "mae": 77.412,
+          "rmse": 100.052,
+          "wape": 30.3834,
+          "smape": 29.0008,
+          "bias": -6.203,
+          "actual_total": 3566.99,
+          "error_share": 0.0085,
+          "revenue_share": 0.0028
+        },
+        {
+          "department": "SEAFOOD",
+          "n": 14,
+          "mae": 58.29,
+          "rmse": 69.964,
+          "wape": 16.458,
+          "smape": 16.6205,
+          "bias": -31.843,
+          "actual_total": 4958.41,
+          "error_share": 0.0064,
+          "revenue_share": 0.0038
+        },
+        {
+          "department": "SALAD BAR",
+          "n": 14,
+          "mae": 47.542,
+          "rmse": 56.144,
+          "wape": 13.636,
+          "smape": 14.0309,
+          "bias": 1.537,
+          "actual_total": 4881.15,
+          "error_share": 0.0052,
+          "revenue_share": 0.0038
+        },
+        {
+          "department": "GARDEN CENTER",
+          "n": 14,
+          "mae": 36.358,
+          "rmse": 71.043,
+          "wape": 117.0886,
+          "smape": 83.4991,
+          "bias": 4.973,
+          "actual_total": 434.72,
+          "error_share": 0.004,
+          "revenue_share": 0.0003
+        },
+        {
+          "department": "RESTAURANT",
+          "n": 14,
+          "mae": 17.591,
+          "rmse": 21.38,
+          "wape": 48.5032,
+          "smape": 52.1176,
+          "bias": -6.34,
+          "actual_total": 507.75,
+          "error_share": 0.0019,
+          "revenue_share": 0.0004
+        },
+        {
+          "department": "TRAVEL & LEISUR",
+          "n": 14,
+          "mae": 11.705,
+          "rmse": 14.954,
+          "wape": 45.3069,
+          "smape": 46.6569,
+          "bias": 0.769,
+          "actual_total": 361.7,
+          "error_share": 0.0013,
+          "revenue_share": 0.0003
+        },
+        {
+          "department": "CHEF SHOPPE",
+          "n": 14,
+          "mae": 10.642,
+          "rmse": 12.627,
+          "wape": 26.5873,
+          "smape": 27.6318,
+          "bias": -4.128,
+          "actual_total": 560.37,
+          "error_share": 0.0012,
+          "revenue_share": 0.0004
+        },
+        {
+          "department": "COUP/STR & MFG",
+          "n": 14,
+          "mae": 7.881,
+          "rmse": 9.763,
+          "wape": 67.9121,
+          "smape": 69.1068,
+          "bias": 0.897,
+          "actual_total": 162.46,
+          "error_share": 0.0009,
+          "revenue_share": 0.0001
+        },
+        {
+          "department": "FROZEN GROCERY",
+          "n": 14,
+          "mae": 6.539,
+          "rmse": 7.999,
+          "wape": 53.6954,
+          "smape": 57.0959,
+          "bias": 1.109,
+          "actual_total": 170.48,
+          "error_share": 0.0007,
+          "revenue_share": 0.0001
+        }
+      ],
+      "pooled_wape": 9.852,
+      "macro_wape": 31.6243,
+      "top_error_share": 0.3688,
+      "top_department": "GROCERY",
+      "note": "pooled_wape is dollar-weighted and macro_wape weights every department equally. A large gap between them means the headline describes the biggest department and not the system."
+    },
+    "volume_tiers": {
+      "tiers": {
+        "large (>= $1k/wk)": {
+          "departments": [
+            "DELI",
+            "DRUG GM",
+            "GROCERY",
+            "KIOSK-GAS",
+            "MEAT",
+            "MEAT-PCKGD",
+            "MISC SALES TRAN",
+            "NUTRITION",
+            "PASTRY",
+            "PRODUCE"
+          ],
+          "n": 140,
+          "mae": 818.689,
+          "rmse": 1559.847,
+          "wape": 9.1339,
+          "smape": 12.7942,
+          "bias": -6.77,
+          "actual_total": 1254845.89
+        },
+        "medium ($100-$1k/wk)": {
+          "departments": [
+            "COSMETICS",
+            "FLORAL",
+            "GARDEN CENTER",
+            "MISC. TRANS.",
+            "SALAD BAR",
+            "SEAFOOD",
+            "SEAFOOD-PCKGD",
+            "SPIRITS"
+          ],
+          "n": 112,
+          "mae": 109.836,
+          "rmse": 200.386,
+          "wape": 31.2551,
+          "smape": 38.143,
+          "bias": -18.162,
+          "actual_total": 39358.75
+        },
+        "sparse (< $100/wk)": {
+          "departments": [
+            "CHEF SHOPPE",
+            "COUP/STR & MFG",
+            "FROZEN GROCERY",
+            "RESTAURANT",
+            "TRAVEL & LEISUR"
+          ],
+          "n": 70,
+          "mae": 10.872,
+          "rmse": 14.138,
+          "wape": 43.1714,
+          "smape": 50.5218,
+          "bias": -1.539,
+          "actual_total": 1762.76
+        }
+      },
+      "note": "The sparse tier is expected to score badly: those series hit zero repeatedly and a percentage error on a $7 week is close to meaningless. They are reported rather than excluded, and the API refuses to serve a department whose trailing scale is below $5."
+    },
+    "promotion_periods": {
+      "bands": {
+        "high promotion": {
+          "median_display_pct_cut": 0.2363,
+          "n": 161,
+          "mae": 556.192,
+          "rmse": 1400.103,
+          "wape": 9.1628,
+          "smape": 28.9175,
+          "bias": -15.635,
+          "actual_total": 977290.93
+        },
+        "low promotion": {
+          "median_display_pct_cut": 0.2363,
+          "n": 161,
+          "mae": 236.846,
+          "rmse": 428.359,
+          "wape": 11.9658,
+          "smape": 30.7081,
+          "bias": -3.555,
+          "actual_total": 318676.47
+        }
+      },
+      "note": "Split on the target week's realised display share, which is an analysis-time quantity. The model had only the previous week's."
+    },
+    "outliers": {
+      "bands": {
+        "normal (|z| < 2.0)": {
+          "n": 286,
+          "mae": 302.33,
+          "rmse": 759.68,
+          "wape": 8.302,
+          "smape": 28.6319,
+          "bias": 133.298,
+          "actual_total": 1041517.9
+        },
+        "outlier (|z| >= 2.0)": {
+          "n": 36,
+          "mae": 1144.797,
+          "rmse": 2236.653,
+          "wape": 16.1968,
+          "smape": 39.1943,
+          "bias": -1144.797,
+          "actual_total": 254449.5
+        }
+      },
+      "z_threshold": 2.0,
+      "note": "Spikes are where a trailing-mean forecast is guaranteed to be wrong, and no model without the cause of the spike in its features can fix that. Reported so the failure is sized rather than implied."
+    },
+    "stale_data": {
+      "fresh": {
+        "n": 299,
+        "mae": 408.944,
+        "rmse": 1068.038,
+        "wape": 10.1599,
+        "smape": 30.1659,
+        "bias": -3.212,
+        "actual_total": 1203497.81
+      },
+      "one_week_stale": {
+        "n": 299,
+        "mae": 396.787,
+        "rmse": 1007.899,
+        "wape": 9.8579,
+        "smape": 31.3636,
+        "bias": -20.589,
+        "actual_total": 1203497.81
+      },
+      "wape_penalty_pp": -0.302,
+      "note": "The stale run reuses the previous week's forecast, built from data one week older. The penalty is what running without the latest week costs."
+    },
+    "challenger_model": {
+      "note": "The same slices scored for the fitted challenger, so the decision not to deploy it can be checked segment by segment rather than on the pooled number alone.",
+      "volume_tiers": {
+        "large (>= $1k/wk)": {
+          "departments": [
+            "DELI",
+            "DRUG GM",
+            "GROCERY",
+            "KIOSK-GAS",
+            "MEAT",
+            "MEAT-PCKGD",
+            "MISC SALES TRAN",
+            "NUTRITION",
+            "PASTRY",
+            "PRODUCE"
+          ],
+          "n": 140,
+          "mae": 819.526,
+          "rmse": 1532.328,
+          "wape": 9.1432,
+          "smape": 12.3115,
+          "bias": -13.433,
+          "actual_total": 1254845.89
+        },
+        "medium ($100-$1k/wk)": {
+          "departments": [
+            "COSMETICS",
+            "FLORAL",
+            "GARDEN CENTER",
+            "MISC. TRANS.",
+            "SALAD BAR",
+            "SEAFOOD",
+            "SEAFOOD-PCKGD",
+            "SPIRITS"
+          ],
+          "n": 112,
+          "mae": 109.112,
+          "rmse": 197.179,
+          "wape": 31.0492,
+          "smape": 48.0186,
+          "bias": -16.397,
+          "actual_total": 39358.75
+        },
+        "sparse (< $100/wk)": {
+          "departments": [
+            "CHEF SHOPPE",
+            "COUP/STR & MFG",
+            "FROZEN GROCERY",
+            "RESTAURANT",
+            "TRAVEL & LEISUR"
+          ],
+          "n": 70,
+          "mae": 11.159,
+          "rmse": 14.712,
+          "wape": 44.3132,
+          "smape": 51.1693,
+          "bias": -0.534,
+          "actual_total": 1762.76
+        }
+      },
+      "department_variation": [
+        {
+          "department": "GROCERY",
+          "n": 14,
+          "mae": 3722.327,
+          "rmse": 4339.63,
+          "wape": 7.7949,
+          "smape": 7.7702,
+          "bias": -284.726,
+          "actual_total": 668549.81,
+          "error_share": 0.408,
+          "revenue_share": 0.5159
+        },
+        {
+          "department": "DRUG GM",
+          "n": 14,
+          "mae": 1068.146,
+          "rmse": 1360.883,
+          "wape": 8.5036,
+          "smape": 8.3473,
+          "bias": -46.121,
+          "actual_total": 175854.56,
+          "error_share": 0.1171,
+          "revenue_share": 0.1357
+        },
+        {
+          "department": "MEAT",
+          "n": 14,
+          "mae": 656.552,
+          "rmse": 804.842,
+          "wape": 10.9728,
+          "smape": 10.7091,
+          "bias": 143.713,
+          "actual_total": 83768.61,
+          "error_share": 0.072,
+          "revenue_share": 0.0646
+        },
+        {
+          "department": "PRODUCE",
+          "n": 14,
+          "mae": 611.307,
+          "rmse": 761.488,
+          "wape": 9.9736,
+          "smape": 10.0694,
+          "bias": -22.146,
+          "actual_total": 85809.59,
+          "error_share": 0.067,
+          "revenue_share": 0.0662
+        },
+        {
+          "department": "KIOSK-GAS",
+          "n": 14,
+          "mae": 476.227,
+          "rmse": 589.847,
+          "wape": 8.4244,
+          "smape": 8.5362,
+          "bias": 95.815,
+          "actual_total": 79141.34,
+          "error_share": 0.0522,
+          "revenue_share": 0.0611
+        },
+        {
+          "department": "MEAT-PCKGD",
+          "n": 14,
+          "mae": 453.456,
+          "rmse": 598.869,
+          "wape": 10.0839,
+          "smape": 10.0075,
+          "bias": -117.028,
+          "actual_total": 62955.94,
+          "error_share": 0.0497,
+          "revenue_share": 0.0486
+        },
+        {
+          "department": "MISC SALES TRAN",
+          "n": 14,
+          "mae": 453.841,
+          "rmse": 702.508,
+          "wape": 30.1377,
+          "smape": 26.6345,
+          "bias": 79.93,
+          "actual_total": 21082.5,
+          "error_share": 0.0497,
+          "revenue_share": 0.0163
+        },
+        {
+          "department": "DELI",
+          "n": 14,
+          "mae": 379.789,
+          "rmse": 518.412,
+          "wape": 12.6693,
+          "smape": 12.1445,
+          "bias": -23.866,
+          "actual_total": 41967.79,
+          "error_share": 0.0416,
+          "revenue_share": 0.0324
+        },
+        {
+          "department": "FLORAL",
+          "n": 14,
+          "mae": 277.91,
+          "rmse": 464.006,
+          "wape": 59.1144,
+          "smape": 52.7116,
+          "bias": -67.392,
+          "actual_total": 6581.72,
+          "error_share": 0.0305,
+          "revenue_share": 0.0051
+        },
+        {
+          "department": "PASTRY",
+          "n": 14,
+          "mae": 238.85,
+          "rmse": 273.866,
+          "wape": 17.6205,
+          "smape": 17.3334,
+          "bias": 51.832,
+          "actual_total": 18977.28,
+          "error_share": 0.0262,
+          "revenue_share": 0.0146
+        },
+        {
+          "department": "SEAFOOD-PCKGD",
+          "n": 14,
+          "mae": 152.307,
+          "rmse": 195.534,
+          "wape": 19.0226,
+          "smape": 19.0488,
+          "bias": -48.349,
+          "actual_total": 11209.33,
+          "error_share": 0.0167,
+          "revenue_share": 0.0086
+        },
+        {
+          "department": "NUTRITION",
+          "n": 14,
+          "mae": 134.762,
+          "rmse": 156.357,
+          "wape": 11.2715,
+          "smape": 11.5633,
+          "bias": -11.738,
+          "actual_total": 16738.47,
+          "error_share": 0.0148,
+          "revenue_share": 0.0129
+        },
+        {
+          "department": "MISC. TRANS.",
+          "n": 14,
+          "mae": 105.833,
+          "rmse": 124.402,
+          "wape": 70.913,
+          "smape": 68.2936,
+          "bias": 0.457,
+          "actual_total": 2089.41,
+          "error_share": 0.0116,
+          "revenue_share": 0.0016
+        },
+        {
+          "department": "COSMETICS",
+          "n": 14,
+          "mae": 100.506,
+          "rmse": 140.488,
+          "wape": 24.9614,
+          "smape": 24.2377,
+          "bias": -1.174,
+          "actual_total": 5637.02,
+          "error_share": 0.011,
+          "revenue_share": 0.0043
+        },
+        {
+          "department": "SPIRITS",
+          "n": 14,
+          "mae": 80.047,
+          "rmse": 95.252,
+          "wape": 31.4176,
+          "smape": 30.3027,
+          "bias": 1.182,
+          "actual_total": 3566.99,
+          "error_share": 0.0088,
+          "revenue_share": 0.0028
+        },
+        {
+          "department": "SEAFOOD",
+          "n": 14,
+          "mae": 64.414,
+          "rmse": 76.754,
+          "wape": 18.1872,
+          "smape": 18.2341,
+          "bias": -34.185,
+          "actual_total": 4958.41,
+          "error_share": 0.0071,
+          "revenue_share": 0.0038
+        },
+        {
+          "department": "SALAD BAR",
+          "n": 14,
+          "mae": 46.29,
+          "rmse": 54.194,
+          "wape": 13.2769,
+          "smape": 13.6044,
+          "bias": 5.621,
+          "actual_total": 4881.15,
+          "error_share": 0.0051,
+          "revenue_share": 0.0038
+        },
+        {
+          "department": "GARDEN CENTER",
+          "n": 14,
+          "mae": 45.589,
+          "rmse": 66.235,
+          "wape": 146.8191,
+          "smape": 157.7159,
+          "bias": 12.661,
+          "actual_total": 434.72,
+          "error_share": 0.005,
+          "revenue_share": 0.0003
+        },
+        {
+          "department": "RESTAURANT",
+          "n": 14,
+          "mae": 17.459,
+          "rmse": 21.61,
+          "wape": 48.1389,
+          "smape": 52.6272,
+          "bias": -8.289,
+          "actual_total": 507.75,
+          "error_share": 0.0019,
+          "revenue_share": 0.0004
+        },
+        {
+          "department": "TRAVEL & LEISUR",
+          "n": 14,
+          "mae": 13.264,
+          "rmse": 16.819,
+          "wape": 51.338,
+          "smape": 48.6785,
+          "bias": 7.672,
+          "actual_total": 361.7,
+          "error_share": 0.0015,
+          "revenue_share": 0.0003
+        },
+        {
+          "department": "CHEF SHOPPE",
+          "n": 14,
+          "mae": 11.248,
+          "rmse": 13.974,
+          "wape": 28.1022,
+          "smape": 28.9059,
+          "bias": -4.213,
+          "actual_total": 560.37,
+          "error_share": 0.0012,
+          "revenue_share": 0.0004
+        },
+        {
+          "department": "FROZEN GROCERY",
+          "n": 14,
+          "mae": 7.062,
+          "rmse": 7.868,
+          "wape": 57.9901,
+          "smape": 61.1775,
+          "bias": 1.209,
+          "actual_total": 170.48,
+          "error_share": 0.0008,
+          "revenue_share": 0.0001
+        },
+        {
+          "department": "COUP/STR & MFG",
+          "n": 14,
+          "mae": 6.763,
+          "rmse": 8.668,
+          "wape": 58.2803,
+          "smape": 64.4572,
+          "bias": 0.948,
+          "actual_total": 162.46,
+          "error_share": 0.0007,
+          "revenue_share": 0.0001
+        }
+      ]
+    }
+  },
+  "servable_weeks": [
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    73,
+    74,
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    90,
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102
+  ],
+  "departments": [
+    "CHEF SHOPPE",
+    "COSMETICS",
+    "COUP/STR & MFG",
+    "DELI",
+    "DRUG GM",
+    "FLORAL",
+    "FROZEN GROCERY",
+    "GARDEN CENTER",
+    "GROCERY",
+    "KIOSK-GAS",
+    "MEAT",
+    "MEAT-PCKGD",
+    "MISC SALES TRAN",
+    "MISC. TRANS.",
+    "NUTRITION",
+    "PASTRY",
+    "PRODUCE",
+    "RESTAURANT",
+    "SALAD BAR",
+    "SEAFOOD",
+    "SEAFOOD-PCKGD",
+    "SPIRITS",
+    "TRAVEL & LEISUR"
+  ],
+  "notes": [
+    "The deployed predictor is chosen by the promotion rule in rrip.forecast.train, applied to the untouched test weeks.",
+    "The fitted challenger is trained on TRAIN weeks only and is not refitted on train+validation+test, so its test metrics describe the exact artifact stored here.",
+    "Prediction intervals are split-conformal at 80%, calibrated on the DEPLOYED predictor's residuals over validation weeks 74-87.",
+    "Permutation importances describe the challenger, not the deployed predictor. When the baseline is deployed its explanation is the weeks it averaged, which the service returns directly."
+  ]
+}

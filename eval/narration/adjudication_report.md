@@ -118,7 +118,9 @@ The reported A/B rested on three discordant pairs. One of them, `NAR-092`, is a 
 
 Rows removed: `NAR-092`. Surviving: `NAR-031`, `NAR-174`.
 
-The direction of the finding does not change — every surviving discordant pair still favours the structured arm, and none favours baseline. What changes is that the evidence gets thinner: the reported figure was already not significant at p = 0.25, and correcting the defect moves it to p = 0.5. **The structured-metric architecture is supported by two cases, not three.**
+Every surviving discordant pair still favours the structured arm and none favours baseline, but that direction is not evidence. **p = 0.5 is the smallest value attainable with 2 discordant pairs**: even a perfect 2-0 split cannot go below it. The design has no power to detect a difference at this sample size, so the A/B claim is withdrawn rather than described as thin.
+
+What survives is architectural and does not rest on this test: numeric metrics are computed deterministically by `rrip.ai.derive`, and the narration layer is evaluated against them. That is verifiable by reading the wiring.
 
 The per-arm faithfulness percentages are NOT restated here. Recomputing them would mean re-running the classifier with the defect fixed, and fixing it is out of scope for this task by instruction. The corrected figure is deferred to that commit.
 
