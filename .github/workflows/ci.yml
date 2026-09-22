@@ -14,9 +14,17 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
+        # `pipeline` as well as `dev`: five test modules import pandas/numpy
+        # at module scope (the forecast and profiling suites), so without it
+        # collection raises ModuleNotFoundError and pytest exits 2 before a
+        # single test runs -- which is what failed every run from #1 to #6.
+        #
+        # The extras split exists to keep the Vercel function under its 250 MB
+        # limit. A CI runner has no such limit; the deployed tier installs from
+        # frontend/api/requirements.txt and is unaffected by this line.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,pipeline]"
       - name: Lint
         run: ruff check .
       - name: Unit tests
