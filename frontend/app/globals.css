@@ -1,6 +1,87 @@
+@import './tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* This app is light-only. `light dark` was here originally and caused a real
+   bug: a visitor whose OS was in dark mode got a dark textarea on the NL Query
+   page with dark text in it, unreadable, while the rest of the page stayed
+   light because `body` sets its background explicitly.
+
+   That is the failure mode of declaring support for a colour scheme the
+   stylesheet does not actually implement — the browser takes it at its word
+   and restyles the controls it owns. */
 :root { color-scheme: light; }
-body { @apply bg-slate-50 text-slate-900 antialiased; }
+
+/* Gate 34. `clip` rather than `hidden`: `hidden` silently creates a scroll
+   container, which kills `position: sticky` on any descendant. Both elements
+   need it — setting it on `body` alone leaves the propagation to `html`
+   ambiguous. */
+html,
+body {
+  overflow-x: clip;
+}
+
+body {
+  background-color: var(--color-paper-2);
+  color: var(--color-ink);
+  font-family: var(--font-body), var(--font-body-fallback);
+  line-height: var(--lh-body);
+  @apply antialiased;
+}
+
+@layer base {
+  /* Tailwind's preflight deliberately leaves form-control colours to the user
+     agent, so an unstyled <textarea> or <select> follows the OS theme. Setting
+     them here rather than per element means a control added later cannot
+     reintroduce the bug by forgetting a class. */
+  textarea,
+  input,
+  select {
+    color-scheme: light;
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+  }
+
+  ::placeholder {
+    color: var(--color-muted);
+    opacity: 1;
+  }
+
+  /* The app previously shipped no focus styling at all — every control fell
+     through to the user-agent ring, which differs per browser and has no
+     guaranteed contrast against a dark fill.
+
+     Deliberately NOT transitioned. A ring that fades in leaves a keyboard user
+     with no indicator for the length of the transition. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Disabled needs more than opacity: opacity alone is invisible to anyone who
+     isn't comparing two controls side by side. */
+  :disabled {
+    cursor: not-allowed;
+  }
+
+  /* Long compound words ("difference-in-differences", "Intelligence") have no
+     break opportunity but the hyphen, so they overflow narrow viewports. */
+  h1, h2, h3 {
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

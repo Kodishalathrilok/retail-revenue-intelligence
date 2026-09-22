@@ -1,0 +1,18 @@
+[
+  {
+    "date": "2026-08-24",
+    "scope": "shell",
+    "target": "frontend/app/layout.tsx",
+    "verb": "redesign",
+    "genre": "editorial",
+    "genre_switched_from": "modern-minimal",
+    "macrostructure": null,
+    "theme": "Almanac (cool-anchored)",
+    "theme_axes": "light / roman-serif / cool-210",
+    "nav": "N6 Newspaper masthead",
+    "nav_knobs": "issue-line=below-wordmark, wordmark=xl, rule=double",
+    "footer": "Ft4 Dense colophon",
+    "enrichment": "none",
+    "brief": "RRIP app shell — masthead carrying the data edition; fixes mobile overflow, adds focus states, first token layer"
+  }
+]

@@ -1,0 +1,76 @@
+/* Hallmark · tokens · genre: editorial · theme: Almanac (cool-anchored)
+ * axes — paper band: light (L 97.6%) · display: roman-serif · accent hue: cool (210)
+ *
+ * The neutrals are anchored on hue 250 because the four page files are painted
+ * in Tailwind slate, which is itself a blue-cast grey. Anchoring warm would have
+ * fractured the shell from the pages it wraps. Chroma is held at 0.005–0.022 --
+ * enough to clear the zero-chroma ban, low enough that nothing reads as tinted.
+ *
+ * The accent is hue 210 rather than a red or a green because red, amber and
+ * emerald are already spoken for as status colours on the forecast, causal and
+ * query pages. An accent that collides with a status scale is not an accent.
+ */
+
+:root {
+  /* ---- surfaces ------------------------------------------------------ */
+  --color-paper:      oklch(99.2% 0.005 250);  /* masthead + card surface  */
+  --color-paper-2:    oklch(97.6% 0.006 250);  /* page ground              */
+  --color-paper-3:    oklch(94.5% 0.008 250);  /* recessed                 */
+
+  /* ---- rules --------------------------------------------------------- */
+  --color-rule:       oklch(89%   0.008 250);  /* hairline                 */
+  --color-rule-firm:  oklch(74%   0.012 250);  /* the masthead double rule */
+
+  /* ---- ink ----------------------------------------------------------- */
+  --color-muted:      oklch(44%   0.018 250);  /* small print              */
+  --color-ink-2:      oklch(33%   0.020 250);  /* secondary               */
+  --color-ink:        oklch(21%   0.022 250);  /* primary                  */
+
+  /* ---- accent -------------------------------------------------------- */
+  --color-accent:     oklch(42%   0.105 210);  /* active nav rule, links   */
+  --color-accent-ink: oklch(99%   0.004 210);  /* text on an accent fill   */
+  --color-focus:      oklch(52%   0.150 210);  /* keyboard ring only       */
+
+  /* ---- type ---------------------------------------------------------- */
+  /* --font-display / --font-body / --font-mono are injected by next/font
+     in app/layout.tsx; these are the fallback stacks behind them. */
+  --font-display-fallback: Georgia, "Times New Roman", serif;
+  --font-body-fallback:    system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono-fallback:    ui-monospace, "Cascadia Mono", Menlo, monospace;
+
+  --text-2xs:  0.6875rem;  /* 11px -- colophon, issue line */
+  --text-xs:   0.75rem;
+  --text-sm:   0.875rem;
+  --text-base: 1rem;
+  --text-md:   1.125rem;
+  --text-lg:   1.375rem;
+  --text-xl:   1.75rem;
+  --text-2xl:  2.25rem;
+
+  /* Masthead wordmark. The ceiling is 2.5rem, not the 3.75rem the broadsheet
+     archetype suggests: this sits above working analytical views, and a
+     display that shouts over its own content is the costume failure mode. */
+  --text-mast: clamp(1.5rem, 4.5vw, 2.5rem);
+
+  --lh-tight:  1.08;
+  --lh-body:   1.55;
+
+  /* ---- space (4pt) ---------------------------------------------------- */
+  --space-3xs: 0.25rem;  --space-2xs: 0.5rem;   --space-xs:  0.75rem;
+  --space-sm:  1rem;     --space-md:  1.5rem;   --space-lg:  2rem;
+  --space-xl:  3rem;     --space-2xl: 4.5rem;   --space-3xl: 7rem;
+
+  --page-gutter: clamp(1rem, 4vw, 1.5rem);
+
+  /* ---- rules, radii, motion ------------------------------------------ */
+  --rule-hair:   1px;
+  --rule-firm:   2px;
+  --radius-card: 8px;
+  --radius-input: 6px;
+
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-short:   120ms;
+
+  /* Minimum hit target. WCAG AA floor for a coarse pointer. */
+  --control-h:   44px;
+}
