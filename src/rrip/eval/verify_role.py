@@ -57,18 +57,20 @@ EXPECTED_STATEMENT_TIMEOUT_MS = MAX_TIMEOUT_MS
 # a role that cannot read is not a working configuration either, and a verifier
 # that only checks denials would pass on a role with no grants at all.
 WRITE_PROBES: tuple[tuple[str, str, str], ...] = (
-    ("insert", "INSERT INTO dim_store",
-     "INSERT INTO dim_store (store_id, has_promo_coverage) VALUES (-999, false)"),
-    ("update", "UPDATE dim_store",
-     "UPDATE dim_store SET has_promo_coverage = false WHERE store_id = -999"),
-    ("delete", "DELETE FROM dim_store",
-     "DELETE FROM dim_store WHERE store_id = -999"),
-    ("truncate", "TRUNCATE dim_store", "TRUNCATE dim_store"),
+    # {dim}, {col} and {fact} are filled per database by _targets(): the local
+    # star schema and the published pub_* tier have different tables, and a
+    # probe aimed at a table that does not exist tests nothing. The statements
+    # avoid depending on column layout -- DEFAULT VALUES, WHERE false -- and
+    # Postgres checks table privileges before it looks at a single row.
+    ("insert", "INSERT INTO {dim}", "INSERT INTO {dim} DEFAULT VALUES"),
+    ("update", "UPDATE {dim}", "UPDATE {dim} SET {col} = {col} WHERE false"),
+    ("delete", "DELETE FROM {dim}", "DELETE FROM {dim} WHERE false"),
+    ("truncate", "TRUNCATE {dim}", "TRUNCATE {dim}"),
     ("create_table", "CREATE TABLE in public",
      "CREATE TABLE rrip_ro_probe (id int)"),
     ("create_function", "CREATE FUNCTION in public",
      "CREATE FUNCTION rrip_ro_probe_fn() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql"),
-    ("drop", "DROP a table", "DROP TABLE IF EXISTS dim_store"),
+    ("drop", "DROP a table", "DROP TABLE IF EXISTS {dim}"),
     ("alter_role", "ALTER own role to superuser", f"ALTER ROLE {ROLE} SUPERUSER"),
     # The bypass that defeated the text gates, in both directions.
     #
@@ -76,7 +78,7 @@ WRITE_PROBES: tuple[tuple[str, str, str], ...] = (
     # one is stopped by query_to_xml being STABLE -- not by the role. Recorded
     # honestly because the repo previously claimed the role was what stopped it.
     ("query_to_xml_delete", "query_to_xml executing a DELETE",
-     "SELECT query_to_xml('DELETE FROM dim_store WHERE store_id = -999', "
+     "SELECT query_to_xml('DELETE FROM {dim} WHERE false', "
      "true, true, '')"),
     # READ: this one DOES execute its argument as the calling role. It is the
     # probe that actually demonstrates the boundary, because the only thing
@@ -91,9 +93,9 @@ WRITE_PROBES: tuple[tuple[str, str, str], ...] = (
 )
 
 READ_PROBES: tuple[tuple[str, str, str], ...] = (
-    ("select_fact", "SELECT from a fact table",
-     "SELECT count(*) FROM fact_transactions"),
-    ("select_dim", "SELECT from a dimension", "SELECT count(*) FROM dim_store"),
+    ("select_fact", "SELECT from a fact table ({fact})",
+     "SELECT count(*) FROM {fact}"),
+    ("select_dim", "SELECT from a dimension ({dim})", "SELECT count(*) FROM {dim}"),
 )
 
 
@@ -131,7 +133,28 @@ def _classify_error(exc: Exception) -> tuple[str, str | None]:
     return "error", sqlstate
 
 
-def _probe_grant_has_no_effect(conn) -> Probe:
+def _targets(conn) -> dict[str, str]:
+    """Tables to aim the probes at, for whichever tier this database holds.
+
+    verify-role used to name dim_store and fact_transactions outright, so on
+    the published tier -- pub_* tables only, and the one the public reaches --
+    every probe hit a missing table and nothing was verified.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('dim_store') IS NOT NULL")
+        local = cur.fetchone()[0]
+        dim, fact = (("dim_store", "fact_transactions") if local
+                     else ("pub_dim_store", "pub_weekly_revenue"))
+        cur.execute("SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = %s "
+                    "ORDER BY ordinal_position LIMIT 1", (dim,))
+        row = cur.fetchone()
+    conn.rollback()
+    return {"dim": dim, "col": row[0] if row else "1", "fact": fact,
+            "tier": "local" if local else "published"}
+
+
+def _probe_grant_has_no_effect(conn, dim: str) -> Probe:
     """GRANT is special: failing to have privilege is a WARNING, not an ERROR.
 
     Postgres accepts `GRANT INSERT ON dim_store TO rrip_ro` from a role with no
@@ -142,12 +165,12 @@ def _probe_grant_has_no_effect(conn) -> Probe:
     So the assertion is on the EFFECT: the privilege must be absent before, and
     still absent after.
     """
-    check = "SELECT has_table_privilege(current_user, 'dim_store', 'INSERT')"
+    check = f"SELECT has_table_privilege(current_user, '{dim}', 'INSERT')"
     try:
         with conn.cursor() as cur:
             cur.execute(check)
             before = cur.fetchone()[0]
-            cur.execute(f"GRANT INSERT ON dim_store TO {ROLE}")
+            cur.execute(f"GRANT INSERT ON {dim} TO {ROLE}")
             cur.execute(check)
             after = cur.fetchone()[0]
         conn.rollback()
@@ -226,9 +249,11 @@ def verify(dsn: str) -> dict:
             timeout_ms = int(cur.fetchone()[0])
         conn.rollback()
 
+        t = _targets(conn)
         for pid, desc, sql in WRITE_PROBES:
-            probes.append(_run_probe(conn, pid, desc, sql, expect_denied=True))
-        probes.append(_probe_grant_has_no_effect(conn))
+            probes.append(_run_probe(conn, pid, desc.format(**t), sql.format(**t),
+                                     expect_denied=True))
+        probes.append(_probe_grant_has_no_effect(conn, t["dim"]))
 
         # The abuse-protection counters (70_api_limits.sql) are no business of
         # the NL->SQL connection. Probed wherever that DDL has been applied.
@@ -242,7 +267,8 @@ def verify(dsn: str) -> dict:
                                      "SELECT count(*) FROM api_rate_limit",
                                      expect_denied=True))
         for pid, desc, sql in READ_PROBES:
-            probes.append(_run_probe(conn, pid, desc, sql, expect_denied=False))
+            probes.append(_run_probe(conn, pid, desc.format(**t), sql.format(**t),
+                                     expect_denied=False))
 
     breaches = [p for p in probes if p.expected == "denied" and p.outcome == "allowed"]
     inconclusive = [p for p in probes
@@ -264,6 +290,7 @@ def verify(dsn: str) -> dict:
         "status": status,
         "role": ROLE,
         "connected_as": user,
+        "tier": t["tier"],
         "database": db,
         "server": version.split(",")[0],
         "checked_at": started.isoformat(),
