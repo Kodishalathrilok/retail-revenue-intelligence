@@ -305,6 +305,29 @@ def eval_report() -> None:
     Console().print(f"wrote {write()}")
 
 
+@app.command("smoke")
+def smoke(
+    base_url: str = typer.Option(..., help="The DEPLOYED site, e.g. https://x.vercel.app"),
+    origin: str = typer.Option("", help="Browser origin the site allows. Defaults to base-url."),
+    rate_limit: int = typer.Option(10, help="The deployment's RRIP_AI_RATE_LIMIT."),
+    window: int = typer.Option(60, help="The deployment's RRIP_AI_RATE_WINDOW_SECONDS."),
+    daily_cap: int = typer.Option(6, help="The deployment's (test-sized) RRIP_LLM_DAILY_CAP."),
+) -> None:
+    """Black-box smoke test of a live deployment. Spends a few model calls.
+
+    Deploy with a small RRIP_LLM_DAILY_CAP first; test E spends it.
+    """
+    import asyncio
+
+    from rrip.eval.smoke import print_report, run
+
+    rep = asyncio.run(run(base_url.rstrip("/"), origin or base_url.rstrip("/"),
+                          rate_limit, window, daily_cap))
+    print_report(rep)
+    if not rep.passed:
+        raise typer.Exit(code=1)
+
+
 @app.command("verify-role")
 def verify_role(
     dsn: str = typer.Option("", help="DSN for the read-only role. "
