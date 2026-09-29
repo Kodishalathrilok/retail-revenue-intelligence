@@ -129,6 +129,14 @@ That is enforced structurally, not by prompting:
   reach. `rrip verify-role` runs 15 probes as `rrip_ro`; **13 of the refusals
   come from PostgreSQL itself**, and the probes use raw SQL that never touches
   the gates, so application and database rejection are never confused.
+
+  The division of labour, stated exactly: **the gates bound what SQL runs and
+  for how long; the role bounds what it can read.** The role also carries a
+  `statement_timeout` default, but that is defence in depth, not a boundary —
+  the setting is user-settable, so any session can override it, and the API
+  sets its own on every connection. What stops generated SQL from raising its
+  limit is the gates: a single `SELECT` only, `set_config` forbidden, and an
+  `EXPLAIN` cost ceiling in front of a 5,000-row cap.
 - **Narration** receives a computed result set with the arithmetic already
   done — absolute changes, percentages and shares are computed by
   [`src/rrip/ai/derive.py`](src/rrip/ai/derive.py) and supplied as named
@@ -160,12 +168,17 @@ disabled, so the router's effect is a measurement rather than a claim.
 | | router off | router on |
 |---|---:|---:|
 | **Result equivalence** vs reference (31 graded) — *the correctness measure* | 93.5% | **93.5%** |
+| ↳ 95% Wilson interval (29 of 31) | 79.3–98.2% | 79.3–98.2% |
 | Final execution success — *SQL ran; not correctness* | 98.1% | 63.5% |
 | First-attempt execution success — *not correctness* | 88.5% | 61.5% |
 | Unanswerable questions refused | 100% | **100%** |
 | Ambiguous questions clarified rather than guessed | 0% | **100%** |
 | **Harmful SQL executed** (12 adversarial/expensive) | **0** | **0** |
 | Router false positives (answerable questions blocked) | — | **0 / 31** |
+
+31 graded questions is a development benchmark, not a precise accuracy
+estimate: the 95% interval runs from 79% to 98%, and a single case moves the
+point estimate by more than three points.
 
 Executable rate and first-attempt success *fall* with the router on, and that is
 the router working: a question it declines never reaches SQL generation, so it
@@ -331,7 +344,7 @@ property of the data rather than a failed experiment:
   week's figure barely predicts next week's. This is also why naive is a weak
   baseline and why quoting an improvement over it would be dishonest.
 - Running the forecast on **one-week-stale data is marginally better**
-  (−0.51pp WAPE). The most recent week carries no usable signal.
+  (−0.30pp WAPE). The most recent week carries no usable signal.
 - An oracle variant given **next week's promotions is worse** (−2.4%).
   Department-week promo aggregates over 92,353 products carry nothing.
 - A **52-week lag performs as well as anything**, which is what a series with
@@ -357,7 +370,7 @@ challenger's residuals but served the baseline's forecasts under-covered at
 77.0% and 91.9% — an interval fitted to one predictor and wrapped around
 another's output. **Pooled WAPE 9.85% against macro WAPE 31.6%** is the gap
 between the dollar-weighted headline and the unweighted truth: GROCERY is 51.6%
-of revenue and carries 40.8% of all error. Sparse departments score 44% WAPE
+of revenue and carries 36.9% of all error. Sparse departments score 43% WAPE
 and are flagged `LOW`; a department whose trailing window is empty is refused
 outright rather than extrapolated.
 
@@ -388,7 +401,11 @@ scenario has not been tested.
 ### Causal result, measured
 
 Difference-in-differences on campaign 26 (310 uncontaminated treated, 2,140
-control, parallel trends hold at p = 0.39):
+control). The pre-treatment trend test **did not reject** parallel trends
+(p = 0.39). That is weaker than "parallel trends hold": the test is one linear
+group × week interaction fitted on weekly group means, so it has little power,
+and failing to detect a pre-trend is not evidence that none exists. A per-week
+event-study on the household panel is the planned upgrade.
 
 | | Estimate | 95% CI | p |
 |---|---:|---:|---:|
@@ -405,8 +422,10 @@ sample size, not that it is zero.
 **The naive number is 4.3× the DiD estimate.** A dashboard reporting
 before/after on the treated group alone would report an effect roughly four
 times larger than the one that survives comparison with a control group. Which
-of the two is closer to the truth depends on the DiD assumptions holding — the
-parallel-trends test below is what makes that checkable rather than asserted.
+of the two is closer to the truth depends on the DiD assumptions holding. The
+pre-trend test makes the key assumption checkable, but — as above — passing it
+is weak evidence, so the DiD figure is the better-founded of the two, not a
+proven causal effect.
 
 Campaign 18 is retained as a contaminated counter-example: 90.8% of its enrolled
 households were simultaneously in an overlapping campaign, parallel trends are
@@ -468,15 +487,17 @@ rrip serve       # FastAPI on :8010 (set RRIP_API_PORT to change)
 python -m pytest
 ```
 
-**710 passed**, 7 skipped, 1 failed — as of `pytest 9.1.1`, 2026-08-14.
+**741 passed**, 0 skipped, 1 failed — as of `pytest 9.1.1`, 2026-09-29, with
+the read-only role deployed locally.
 
 The convention is **passed-only**: a quoted suite size is the `passed` count
-from one full run, never `passed + skipped` and never the collected total.
-Those three numbers differ here by eight, which is enough for two documents
-quoting different ones to look like a regression.
+from one full run, never `passed + skipped` and never the collected total. Those
+numbers can differ, and two documents quoting different ones would look like a
+regression.
 
-The skips are visible on purpose — the read-only role probes skip when no
-`RRIP_RO_DSN` is configured rather than passing vacuously. The failure is
+Skips are visible on purpose — without `RRIP_RO_PASSWORD` or `RRIP_RO_DSN` the
+read-only role probes skip rather than passing vacuously; this run had the role
+configured, so none skipped. The failure is
 `test_load_integrity.py::test_rerunning_a_dimension_insert_is_a_noop`, which
 needs the `stg_product` staging table that exists only mid-load; it is a
 fixture gap, not a defect in the code under test, and it is quoted here rather

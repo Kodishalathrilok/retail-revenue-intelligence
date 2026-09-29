@@ -125,3 +125,22 @@ def test_only_refusal_sqlstates_count_as_denials():
     assert "42501" in DATABASE_REFUSALS
     assert "0A000" in DATABASE_REFUSALS
     assert "42P01" not in DATABASE_REFUSALS
+
+
+@requires_role
+def test_role_carries_the_statement_timeout_default(report):
+    td = report["statement_timeout_default"]
+    assert td["ok"], f"rrip_ro statement_timeout default is {td['observed_ms']} ms"
+
+
+def test_role_timeout_in_ddl_matches_the_api_ceiling():
+    # No database needed: the DDL literal and the API constant must not drift.
+    import re
+    from pathlib import Path
+
+    from rrip.api.db import MAX_TIMEOUT_MS
+
+    ddl = (Path(__file__).parents[1] / "sql/ddl/60_readonly_role.sql").read_text()
+    m = re.search(r"ALTER ROLE rrip_ro SET statement_timeout = '(\d+)s'", ddl)
+    assert m, "60_readonly_role.sql no longer sets a statement_timeout default"
+    assert int(m.group(1)) * 1000 == MAX_TIMEOUT_MS

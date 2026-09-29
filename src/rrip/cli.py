@@ -94,11 +94,15 @@ def bench_summary(run_id: int = typer.Option(None, help="Defaults to latest run.
 @app.command()
 def quality(
     category: str = typer.Option("", help="Run only one category, e.g. 'time_model'."),
+    sql_only: bool = typer.Option(
+        False, "--sql-only",
+        help="Judge only that every check's SQL executes; thresholds are shown, "
+             "not judged. For CI, which has the schema but not the data."),
 ) -> None:
     """Phase 4: run the data quality suite. Exits non-zero on any failure."""
     from rrip.quality.runner import run as run_quality
 
-    failures, _warnings, _path = run_quality(category or None)
+    failures, _warnings, _path = run_quality(category or None, sql_only=sql_only)
     if failures:
         raise typer.Exit(code=1)
 
@@ -155,7 +159,9 @@ def eval_nl2sql(
     from rrip.eval.runner import print_summary, run_sync
 
     report = run_sync(
-        get_provider(provider or None),
+        # use_cache from settings: without it RRIP_LLM_CACHE=0 was ignored and
+        # every "cold" run silently re-served cached responses.
+        get_provider(provider or None, use_cache=settings.llm_cache),
         tier or ("published" if settings.is_published else "local"),
         category=category or None, limit=limit or None, max_attempts=attempts,
         use_router=router)
@@ -181,9 +187,10 @@ def eval_narration(
     of this system.
     """
     from rrip.ai.provider import get_provider
+    from rrip.config import settings
     from rrip.eval.narration_bench import print_summary, run_sync
 
-    report = run_sync(get_provider(provider or None),
+    report = run_sync(get_provider(provider or None, use_cache=settings.llm_cache),
                       limit=limit or None, category=category or None)
     print_summary(report)
 

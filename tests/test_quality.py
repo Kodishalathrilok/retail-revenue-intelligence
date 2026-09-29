@@ -160,3 +160,76 @@ def test_unknown_rule_raises() -> None:
     chk = Check("t", "c", "SELECT x", "nonsense")
     with pytest.raises(ValueError):
         evaluate(FakeConn(0), chk)
+
+
+# --- --sql-only, the mode CI runs ----------------------------------------------
+
+class _AbortingConn:
+    """Mimics Postgres: after one failed statement the transaction is aborted
+    and every later statement fails too, until rollback()."""
+
+    def __init__(self):
+        self.aborted, self.rollbacks = False, 0
+
+    def cursor(self):
+        conn = self
+
+        class _Cur:
+            def execute(self, sql, params=None):
+                if conn.aborted:
+                    raise RuntimeError("InFailedSqlTransaction")
+                if "BROKEN" in sql:
+                    conn.aborted = True
+                    raise RuntimeError("syntax error")
+
+            def fetchone(self):
+                return (5,)          # a threshold miss for a 'zero' rule
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Cur()
+
+    def rollback(self):
+        self.aborted, self.rollbacks = False, self.rollbacks + 1
+
+
+def _run_with(monkeypatch, tmp_path, checks, sql_only):
+    from contextlib import contextmanager
+
+    import rrip.quality.runner as R
+
+    conn = _AbortingConn()
+
+    @contextmanager
+    def fake_connect():
+        yield conn
+
+    monkeypatch.setattr(R, "connect", fake_connect)
+    monkeypatch.setattr(R, "CHECKS", checks)
+    failures, warnings, path = R.run(report_dir=tmp_path, sql_only=sql_only)
+    return failures, conn
+
+
+def test_sql_only_ignores_threshold_misses(monkeypatch, tmp_path) -> None:
+    checks = [Check("miss", "c", "SELECT 5", "zero")]
+    assert _run_with(monkeypatch, tmp_path, checks, sql_only=True)[0] == 0
+    assert _run_with(monkeypatch, tmp_path, checks, sql_only=False)[0] == 1
+
+
+def test_sql_only_fails_on_sql_that_raises(monkeypatch, tmp_path) -> None:
+    checks = [Check("broken", "c", "SELECT BROKEN", "zero")]
+    assert _run_with(monkeypatch, tmp_path, checks, sql_only=True)[0] == 1
+
+
+def test_one_raising_check_does_not_poison_the_rest(monkeypatch, tmp_path) -> None:
+    # Without the rollback, 'after' would raise InFailedSqlTransaction and be
+    # counted as broken SQL too.
+    checks = [Check("broken", "c", "SELECT BROKEN", "zero"),
+              Check("after", "c", "SELECT 5", "zero")]
+    failures, conn = _run_with(monkeypatch, tmp_path, checks, sql_only=True)
+    assert failures == 1
+    assert conn.rollbacks == 1

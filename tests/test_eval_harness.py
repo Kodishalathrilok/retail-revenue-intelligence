@@ -287,3 +287,12 @@ def test_reference_sql_is_never_dangerous() -> None:
     for c in CASES:
         if c.reference_sql:
             assert not looks_dangerous(c.reference_sql), c.id
+
+
+def test_latest_artefact_is_named_per_tier_and_router() -> None:
+    from rrip.eval.runner import latest_name
+
+    names = {latest_name(t, r) for t in ("local", "published") for r in (True, False)}
+    assert len(names) == 4                       # no configuration overwrites another
+    assert latest_name("local", True) == "latest.json"
+    assert latest_name("local", False) == "latest-norouter.json"

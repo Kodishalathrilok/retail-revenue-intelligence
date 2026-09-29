@@ -242,7 +242,11 @@ class GeminiProvider(LLMProvider):
                 url = f"{self.endpoint}/{model}:generateContent"
                 r = await client.post(url, headers=headers, json=body)
 
-                if r.status_code in (404, 429):
+                # 503 joins 404/429: "model is currently experiencing high
+                # demand" is about that model, not the request, and retrying
+                # the same overloaded model four times while a working one sits
+                # next in the chain turned a demand spike into a failed answer.
+                if r.status_code in (404, 429, 503):
                     last_status, last_detail = r.status_code, r.text[:200]
                     if i < len(self.MODELS) - 1:
                         continue  # this model is unavailable; try the next

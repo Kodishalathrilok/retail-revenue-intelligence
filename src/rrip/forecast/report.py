@@ -40,6 +40,38 @@ def _usd(v, nd: int = 1) -> str:
     return f"{v:,.{nd}f}" if isinstance(v, (int, float)) else MISSING
 
 
+def _deployed_slices(m: dict) -> dict:
+    """Figures the prose quotes, read from the deployed predictor's robustness.
+
+    The prose used to carry literals -- 40.8% error share, 44% sparse WAPE --
+    that were the CHALLENGER's slices, and outlier figures from no current
+    artefact, sitting beside tables that said otherwise. Quoting from the same
+    dict the tables render keeps the two from disagreeing again.
+    """
+    rb = m.get("robustness") or {}
+    dv = rb.get("department_variation") or {}
+    top = dv.get("top_department")
+    top_row = next((r for r in dv.get("departments", []) if r["department"] == top), {})
+
+    def band(d: dict, prefix: str):
+        return next((v.get("wape") for k, v in d.items() if k.startswith(prefix)), None)
+
+    tiers = (rb.get("volume_tiers") or {}).get("tiers", {})
+    bands = (rb.get("outliers") or {}).get("bands", {})
+    return {
+        "top": top or "the largest department",
+        "top_error_share": dv.get("top_error_share"),
+        "top_revenue_share": top_row.get("revenue_share"),
+        "sparse_wape": band(tiers, "sparse"),
+        "outlier_wape": band(bands, "outlier"),
+        "normal_wape": band(bands, "normal"),
+    }
+
+
+def _share(v) -> str:
+    return MISSING if v is None else f"{v:.1%}"
+
+
 def _ranking_caveat(m: dict) -> list[str]:
     """Where the deployed predictor actually ranks on test, stated up front.
 
@@ -491,6 +523,7 @@ def _baselines_section(m: dict) -> list[str]:
 
 
 def _test_section(m: dict) -> list[str]:
+    sl = _deployed_slices(m)
     metrics = m.get("metrics") or {}
     test = metrics.get("test") or {}
     bl = metrics.get("test_baselines") or {}
@@ -556,9 +589,10 @@ def _test_section(m: dict) -> list[str]:
         f"{_pct(metrics.get('macro_wape_test'))} |",
         "",
         "The gap between those two columns is the single most important "
-        "caveat in this report. Pooled WAPE is dollar-weighted, GROCERY is "
-        "51.6% of revenue and carries 40.8% of total absolute error, so the "
-        "headline figure is substantially a statement about GROCERY.",
+        f"caveat in this report. Pooled WAPE is dollar-weighted, {sl['top']} is "
+        f"{_share(sl['top_revenue_share'])} of revenue and carries "
+        f"{_share(sl['top_error_share'])} of the deployed predictor's absolute "
+        f"error, so the headline figure is substantially a statement about {sl['top']}.",
         "",
     ]
     return lines
@@ -952,6 +986,7 @@ def _nl_section() -> list[str]:
 
 
 def _limitations_section(m: dict) -> list[str]:
+    sl = _deployed_slices(m)
     return [
         "## 13. Limitations",
         "",
@@ -962,13 +997,15 @@ def _limitations_section(m: dict) -> list[str]:
         "Differences of under roughly one WAPE point are not resolvable here, "
         "which is why the deployment decision required a significance test "
         "rather than a lower number.",
-        "2. **The headline is largely one department.** GROCERY is 51.6% of "
-        "revenue and 40.8% of absolute error. Pooled WAPE "
+        f"2. **The headline is largely one department.** {sl['top']} is "
+        f"{_share(sl['top_revenue_share'])} of revenue and "
+        f"{_share(sl['top_error_share'])} of absolute error. Pooled WAPE "
         f"{_pct((m.get('metrics') or {}).get('test', {}).get('scores', {}).get('wape'))} "
         f"against macro WAPE {_pct((m.get('metrics') or {}).get('macro_wape_test'))} "
         "is the size of that gap.",
         "3. **Small departments are not forecastable.** The sparse tier scores "
-        "44% WAPE. They are served with a `LOW` flag or refused, not silently "
+        f"{_pct(sl['sparse_wape'], 0)} WAPE. They are served with a `LOW` flag "
+        "or refused, not silently "
         "included in an average.",
         "4. **One week ahead only.** Every feature is a lag or a rolling window "
         "over observed revenue; at two weeks the most informative of them does "
@@ -989,9 +1026,9 @@ def _limitations_section(m: dict) -> list[str]:
         "landed close to nominal on this test set; that is evidence, not a "
         "warranty.",
         "9. **The deployed predictor is a trailing mean.** It cannot anticipate "
-        "a spike, a promotion, or a level shift. Outlier weeks score 14.7% "
-        "WAPE against 8.7% on normal ones, and no model tested here fixed "
-        "that.",
+        "a spike, a promotion, or a level shift. Outlier weeks score "
+        f"{_pct(sl['outlier_wape'], 1)} WAPE against {_pct(sl['normal_wape'], 1)} "
+        "on normal ones, and no model tested here fixed that.",
         "",
     ]
 

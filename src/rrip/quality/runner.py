@@ -56,8 +56,16 @@ def evaluate(conn, chk: Check) -> dict:
             "rationale": chk.rationale}
 
 
-def run(category: str | None = None, report_dir: Path | None = None) -> tuple[int, int, Path]:
-    """Returns (failures, warnings, report_path)."""
+def run(category: str | None = None, report_dir: Path | None = None,
+        sql_only: bool = False) -> tuple[int, int, Path]:
+    """Returns (failures, warnings, report_path).
+
+    sql_only judges whether every check's SQL EXECUTES against the schema, not
+    whether its threshold holds. That is the question CI can answer: it has the
+    DDL but not the licensed data, so every data threshold would fail there for
+    reasons that say nothing about the code. A check that raises is a failure in
+    either mode.
+    """
     selected = [c for c in CHECKS if not category or c.category == category]
     results: list[dict] = []
 
@@ -70,10 +78,18 @@ def run(category: str | None = None, report_dir: Path | None = None) -> tuple[in
                     "name": chk.name, "category": chk.category, "severity": "error",
                     "observed": None, "expected": None, "passed": False,
                     "detail": f"check raised {type(exc).__name__}: {exc}",
-                    "rationale": chk.rationale})
+                    "rationale": chk.rationale, "raised": True})
+                # A failed statement aborts the transaction. Without this every
+                # later check reports the same InFailedSqlTransaction instead of
+                # its own result.
+                conn.rollback()
 
-    failures = sum(1 for r in results if not r["passed"] and r["severity"] == "error")
-    warnings = sum(1 for r in results if not r["passed"] and r["severity"] == "warn")
+    if sql_only:
+        failures = sum(1 for r in results if r.get("raised"))
+        warnings = 0
+    else:
+        failures = sum(1 for r in results if not r["passed"] and r["severity"] == "error")
+        warnings = sum(1 for r in results if not r["passed"] and r["severity"] == "warn")
 
     t = Table(title="Data quality suite")
     for c in ("check", "category", "observed", "expected", "result"):
@@ -107,11 +123,15 @@ def run(category: str | None = None, report_dir: Path | None = None) -> tuple[in
     path.write_text(json.dumps({
         "generated_at": datetime.now(UTC).isoformat(),
         "checks_run": len(results),
+        "mode": "sql_only" if sql_only else "full",
         "failures": failures,
         "warnings": warnings,
         "results": results,
     }, indent=2, default=str), encoding="utf-8")
 
+    if sql_only:
+        console.print("\n[dim]--sql-only: thresholds above are shown, not judged. "
+                      "Only a check whose SQL raised counts as a failure.[/dim]")
     console.print(f"\n{len(results)} checks | "
                   f"[{'red' if failures else 'green'}]{failures} failures[/] | "
                   f"[yellow]{warnings} warnings[/yellow]")

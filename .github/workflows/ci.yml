@@ -59,9 +59,11 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
+        # `pipeline` because the schema step imports the loader's calendar
+        # derivation, and rrip.ingest.loader imports pandas via discovery.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,pipeline]"
 
       - name: Verify DDL parses
         # The .sql splitter silently corrupted a DDL file once; this fails the
@@ -69,22 +71,39 @@ jobs:
         run: pytest -q tests/test_sql_splitter.py
 
       - name: Apply schema
+        # The loader's own order (rrip.ingest.loader.run): control and
+        # dimensions, then the calendar -- derived from the anchor rule, not
+        # loaded, so it needs no licensed data -- then facts, which read
+        # dim_date for their partition bounds, then constraints and indexes.
         run: |
           python -c "
+          from rrip.config import settings
           from rrip.db.connection import connect, apply_sql_file
+          from rrip.ingest.loader import _derive_date, _derive_week
           with connect() as c:
-              for f in ('sql/ddl/05_control.sql','sql/ddl/10_dimensions.sql'):
+              for f in ('sql/ddl/05_control.sql', 'sql/ddl/10_dimensions.sql'):
+                  apply_sql_file(c, f); c.commit()
+              _derive_week(c, settings.day1_date)
+              _derive_date(c, settings.day1_date)
+              c.commit()
+              for f in ('sql/ddl/20_facts.sql', 'sql/ddl/30_constraints.sql',
+                        'sql/ddl/40_indexes.sql'):
                   apply_sql_file(c, f); c.commit()
           print('schema applied')
           "
 
       # The full 39.6M-row load is not run in CI -- the raw files are licensed
-      # and ~1.5 GB. The quality suite is exercised against the schema so its
-      # SQL is proven to parse and execute; the data-dependent thresholds are
+      # and ~1.5 GB. So CI judges exactly what it can: that every check's SQL
+      # executes against the real schema (--sql-only fails on any check that
+      # raises), and that the calendar checks pass in full, since the calendar
+      # is derived rather than loaded. The data-dependent thresholds are
       # verified locally against a real load and in tests/test_quality.py
       # against fixtures.
-      - name: Quality suite SQL executes
-        run: python -m rrip.cli quality --category time_model || true
+      - name: Quality suite SQL executes against the schema
+        run: python -m rrip.cli quality --sql-only
+
+      - name: Calendar checks pass
+        run: python -m rrip.cli quality --category time_model
 
       - name: Quality check definitions are well-formed
         run: pytest -q tests/test_quality.py
