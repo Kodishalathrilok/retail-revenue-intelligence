@@ -339,3 +339,40 @@ def test_refusals_share_one_base_so_call_sites_can_re_raise_them() -> None:
     for cls in (limits.RateLimitExceeded, limits.DailyCapReached,
                 limits.OriginNotAllowed, limits.ProtectionUnavailable):
         assert issubclass(cls, CallRefused)
+
+
+# --- daily-cap contract: what is and is not charged -----------------------------
+
+def test_a_refused_request_charges_nothing(monkeypatch, protection_on) -> None:
+    charged = []
+
+    async def over(ip, **k):
+        raise limits.RateLimitExceeded(limits._RATE, retry_after=5)
+
+    async def charge(**k):
+        charged.append(1)
+
+    monkeypatch.setattr(limits, "hit_ip", over)
+    monkeypatch.setattr(limits, "charge_llm_call", charge)
+    for method, path, body in LLM_ROUTES:
+        assert _call(_client(), method, path, body).status_code == 429
+    assert charged == []
+
+
+def test_cli_and_benchmark_traffic_is_outside_the_public_cap() -> None:
+    # The CLI and the eval harness obtain providers directly; only the API goes
+    # through guarded_provider(), which is what attaches the cap.
+    from pathlib import Path
+
+    from rrip.ai.provider import get_provider
+
+    assert get_provider("fake").budget is None
+    src = Path(__file__).resolve().parents[1] / "src/rrip"
+    for rel in ("cli.py", "eval/runner.py", "eval/narration_bench.py"):
+        assert "guarded_provider" not in (src / rel).read_text(encoding="utf-8"), rel
+
+
+def test_liveness_needs_neither_database_nor_provider() -> None:
+    # No lifespan here, so no pool exists: a DB-backed check would fail.
+    r = _client().get("/health/live")
+    assert r.status_code == 200 and r.json() == {"status": "ok"}

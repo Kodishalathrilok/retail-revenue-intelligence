@@ -6,6 +6,7 @@ import logging
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 
 from rrip.ai.narration import narrate
 from rrip.ai.nl2sql import answer
@@ -29,6 +30,20 @@ _PROVIDER_DOWN = "The language model provider is unavailable. Try again shortly.
 
 def _provider(name: str | None = None):
     return limits.guarded_provider(name)
+
+
+def _ai_unavailable(departments: list[str]) -> JSONResponse:
+    """The model was needed and could not be reached. Stated as such, with the
+    one thing a visitor can do about it: name the department themselves, which
+    the deterministic matcher handles without any model."""
+    return JSONResponse(status_code=503, content={
+        "error": "AI_UNAVAILABLE",
+        "message": ("The language model is unavailable, and it was needed to work "
+                    "out which department this question is about. Name one of the "
+                    "departments below and the forecast works without it."),
+        "retry_after": None,
+        "available_departments": departments,
+    })
 
 
 def _public_reason(reason: str | None) -> str | None:
@@ -168,19 +183,25 @@ async def ask(payload: dict, provider: str | None = None) -> dict:
                                   "message": str(exc)}) from exc
 
     intent = FI.resolve(question, store.departments)
-    if not intent.is_complete:
+    if not intent.is_complete and not intent.unknown_department:
+        # The deterministic matcher found no department; only now is the model
+        # asked. If it cannot be asked, say THAT. Replying "Which department?"
+        # would present a provider outage as a flaw in the question.
         try:
             p = _provider(provider)
-            if p.available:
-                intent = await FI.resolve_with_llm(question, store.departments, p)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if not p.available:
+            return _ai_unavailable(store.departments)
+        try:
+            intent = await FI.resolve_with_llm(question, store.departments, p)
         except CallRefused:
             raise                   # rate limit or daily cap: say so
-        except (ValueError, LLMError):
-            # The deterministic matcher already ran. A provider that is missing
-            # or failing costs a clarification prompt, not an answer. LLMError,
-            # not only LLMUnavailable: any other provider failure used to
-            # escape as an unhandled 500.
-            pass
+        except LLMError as exc:
+            # The whole fallback chain failed (Gemini already falls through
+            # its models on 404/429/503 inside the call).
+            logger.warning("/ask provider unavailable: %s", exc)
+            return _ai_unavailable(store.departments)
 
     if not intent.is_complete:
         return {

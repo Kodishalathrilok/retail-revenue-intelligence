@@ -109,8 +109,8 @@ Refresh is manual. The panel ended at day 711; the data does not change.
 | 3 | **A host for the FastAPI service** | Cloud Run, Render or Fly.io | The API is Python, so Vercel cannot host it | **Fly.io has no free tier** -- it was removed in 2024, and new accounts get a 2-hour trial then need a card (~$2-5/month). See the comparison below. |
 | 4 | **Gemini API key for the hosted env** | already have | NL→SQL and narration | Set as an environment variable on the API host — **not** committed. The rotated key is fine. |
 | 5 | **GitHub repository** | — | CI already exists and needs somewhere to run | Currently local-only, no remote. |
-| 6 | **Read-only role on the published database** | Neon SQL editor or `psql` | The NL→SQL endpoint is public; the validator is defence in depth, the role is the boundary | Run [`sql/ddl/60_readonly_role.sql`](../sql/ddl/60_readonly_role.sql) **after** `rrip publish` creates the tables, then point `RRIP_PG_DSN` at `rrip_ro`. See below. |
-| 7 | **Limiter role on the published database** | Neon SQL editor or `psql` | The AI endpoints spend Gemini calls; without the counters they refuse on the published tier | Run [`sql/ddl/70_api_limits.sql`](../sql/ddl/70_api_limits.sql) **after** step 6, then set `RRIP_LIMITER_DSN` and `RRIP_TRUSTED_IP_HEADER=x-real-ip` in the Vercel environment. See below. |
+| 6 | **Read-only role on the published database** | Neon SQL editor or `psql` | The NL→SQL endpoint is public; the validator is defence in depth, the role is the boundary | Run [`sql/ddl/60_readonly_role.sql`](../sql/ddl/60_readonly_role.sql) **after** `rrip publish` creates the tables, then set `RRIP_PG_READONLY_DSN` to a DSN for `rrip_ro`, and do **not** give the API `RRIP_PG_DSN` at all. See below. |
+| 7 | **Limiter role on the published database** | Neon SQL editor or `psql` | The AI endpoints spend Gemini calls; without the counters they refuse on the published tier | Run [`sql/ddl/70_api_limits.sql`](../sql/ddl/70_api_limits.sql) **after** step 6, then set `RRIP_LIMITER_DSN` and `RRIP_TRUSTED_IP_HEADER=x-vercel-forwarded-for` in the Vercel environment. See below. |
 
 **Not needed:** any domain, any Anthropic key.
 
@@ -128,17 +128,24 @@ So the API must not connect as the table owner:
 psql "$RRIP_PUBLISH_DSN" -v ro_password='<generate one>' -f sql/ddl/60_readonly_role.sql
 ```
 
-Then set `RRIP_PG_DSN` to the same connection string with the user and password
-swapped for `rrip_ro`. Run it again after any `rrip publish` that adds a table —
+Then set `RRIP_PG_READONLY_DSN` to the same connection string with the user and
+password swapped for `rrip_ro`. That one name is what the API pool connects with
+**and** what `rrip verify-role` checks, so a passing verification is a statement
+about the serving connection. `RRIP_PG_DSN` is the loader's owning credential and
+must not be set on the deployment at all; on the published tier the API refuses
+to start its pool without `RRIP_PG_READONLY_DSN` rather than fall back to it.
+(An earlier version of this line said to put `rrip_ro` in `RRIP_PG_DSN` -- the
+wrong variable -- and the first deployment ran its public NL->SQL endpoint as the
+database owner.) Run it again after any `rrip publish` that adds a table —
 `ALTER DEFAULT PRIVILEGES` covers new tables created by the same owning role,
 but not tables created by a different one.
 
 Verify from the API's own credentials, not the owner's:
 
 ```bash
-psql "$RRIP_PG_DSN" -c "CREATE TABLE probe (x int)"   # must fail: permission denied
-psql "$RRIP_PG_DSN" -c "DELETE FROM pub_headline"     # must fail: permission denied
-psql "$RRIP_PG_DSN" -c "SELECT count(*) FROM pub_headline"   # must succeed
+psql "$RRIP_PG_READONLY_DSN" -c "CREATE TABLE probe (x int)"   # must fail: permission denied
+psql "$RRIP_PG_READONLY_DSN" -c "DELETE FROM pub_headline"     # must fail: permission denied
+psql "$RRIP_PG_READONLY_DSN" -c "SELECT count(*) FROM pub_headline"   # must succeed
 ```
 
 Two failures and one success is the passing result. If the first two succeed,
@@ -161,7 +168,7 @@ Then, in the Vercel project environment (never committed):
 | Variable | Value |
 |---|---|
 | `RRIP_LIMITER_DSN` | the Neon DSN with the user and password swapped for `rrip_limiter` |
-| `RRIP_TRUSTED_IP_HEADER` | `x-real-ip` |
+| `RRIP_TRUSTED_IP_HEADER` | `x-vercel-forwarded-for` |
 | `RRIP_CORS_ORIGINS` | the deployed site's origin, e.g. `https://<project>.vercel.app` -- the same list gates the AI endpoints' origin check |
 | `RRIP_AI_RATE_LIMIT`, `RRIP_AI_RATE_WINDOW_SECONDS`, `RRIP_LLM_DAILY_CAP` | optional; defaults 10 per 60 s and 300 calls per UTC day |
 

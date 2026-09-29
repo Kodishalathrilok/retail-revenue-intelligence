@@ -308,7 +308,7 @@ def eval_report() -> None:
 @app.command("verify-role")
 def verify_role(
     dsn: str = typer.Option("", help="DSN for the read-only role. "
-                                     "Defaults to RRIP_RO_DSN / RRIP_RO_PASSWORD."),
+                                     "Defaults to RRIP_PG_READONLY_DSN, the API's own."),
 ) -> None:
     """Connect as rrip_ro and attempt every forbidden operation.
 

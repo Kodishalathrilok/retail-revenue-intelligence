@@ -71,9 +71,17 @@ app.include_router(causal_routes.router)
 app.include_router(forecast_routes.router)
 
 
+@app.get("/health/live")
+async def live() -> dict:
+    """Liveness: the process answers. Touches neither the database nor the
+    model provider, so neither being down makes the app look dead."""
+    return {"status": "ok"}
+
+
 @app.get("/health")
 async def health() -> dict:
-    """Health check that works on BOTH tiers.
+    """Readiness: the data store answers. Works on BOTH tiers. It never
+    consults the model provider -- the dashboards do not need it.
 
     It previously counted fact_transactions, which does not exist on the
     published tier -- so the health endpoint itself would have been the first

@@ -105,6 +105,14 @@ jobs:
       - name: Calendar checks pass
         run: python -m rrip.cli quality --category time_model
 
+      - name: Create the read-only API role
+        # Before the limiter DDL, which revokes rrip_ro's access to the counters.
+        env:
+          PGPASSWORD: postgres
+        run: >-
+          psql -h localhost -U postgres -d rrip -v ON_ERROR_STOP=1 -q
+          -v ro_password=ci-readonly -f sql/ddl/60_readonly_role.sql
+
       - name: Apply limiter DDL (twice -- it must be idempotent)
         env:
           PGPASSWORD: postgres
@@ -121,6 +129,16 @@ jobs:
           RRIP_TEST_LIMITER_DSN: postgresql://rrip_limiter:ci-limiter@localhost:5432/rrip
           RRIP_REQUIRE_LIMITER_DB: "1"
         run: pytest -q tests/test_api_limits_db.py
+
+      - name: The API's own DSN is the read-only role, and the role holds
+        # Resolved exactly as the API pool resolves it (RRIP_PG_READONLY_DSN).
+        # RRIP_REQUIRE_RO_DB makes a missing DSN a failure rather than a skip.
+        env:
+          RRIP_PG_READONLY_DSN: postgresql://rrip_ro:ci-readonly@localhost:5432/rrip
+          RRIP_REQUIRE_RO_DB: "1"
+        run: |
+          pytest -q tests/test_readonly_role.py
+          python -m rrip.cli verify-role
 
       - name: Quality check definitions are well-formed
         run: pytest -q tests/test_quality.py

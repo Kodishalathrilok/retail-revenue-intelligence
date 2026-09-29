@@ -43,7 +43,7 @@ from datetime import UTC, datetime
 import psycopg
 
 from rrip.api.db import MAX_TIMEOUT_MS
-from rrip.config import PROJECT_ROOT, settings
+from rrip.config import PROJECT_ROOT
 
 ROLE = "rrip_ro"
 
@@ -204,7 +204,7 @@ def verify(dsn: str) -> dict:
             "checked_at": started.isoformat(),
             "reason": (f"could not connect as {ROLE}: {str(exc).strip()[:200]}"),
             "remedy": ("Run sql/ddl/60_readonly_role.sql against this database "
-                       "with -v ro_password='...', then set RRIP_RO_DSN."),
+                       "with -v ro_password='...', then set RRIP_PG_READONLY_DSN."),
             "probes": [],
         }
 
@@ -229,6 +229,18 @@ def verify(dsn: str) -> dict:
         for pid, desc, sql in WRITE_PROBES:
             probes.append(_run_probe(conn, pid, desc, sql, expect_denied=True))
         probes.append(_probe_grant_has_no_effect(conn))
+
+        # The abuse-protection counters (70_api_limits.sql) are no business of
+        # the NL->SQL connection. Probed wherever that DDL has been applied.
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('api_rate_limit') IS NOT NULL")
+            has_limiter = cur.fetchone()[0]
+        conn.rollback()
+        if has_limiter:
+            probes.append(_run_probe(conn, "limiter_counters",
+                                     "SELECT from the limiter's counters",
+                                     "SELECT count(*) FROM api_rate_limit",
+                                     expect_denied=True))
         for pid, desc, sql in READ_PROBES:
             probes.append(_run_probe(conn, pid, desc, sql, expect_denied=False))
 
@@ -280,23 +292,16 @@ def verify(dsn: str) -> dict:
 
 
 def ro_dsn() -> str | None:
-    """DSN for the read-only role.
+    """DSN for the read-only role: exactly the one the API pool connects with.
 
-    Explicit RRIP_RO_DSN wins. Otherwise the local connection is rewritten to
-    use the role, which only works if RRIP_RO_PASSWORD is set -- there is no
-    default password, because a verifier that silently tries a guessed one
-    reports NOT_DEPLOYED for the wrong reason.
+    Resolved by rrip.api.db.readonly_dsn(), the same function conninfo() uses.
+    There used to be separate names for verification (RRIP_RO_DSN /
+    RRIP_RO_PASSWORD), which let this pass against rrip_ro while the API
+    connected as another role; those names now raise.
     """
-    import os
+    from rrip.api.db import readonly_dsn
 
-    explicit = os.getenv("RRIP_RO_DSN")
-    if explicit:
-        return explicit
-    password = os.getenv("RRIP_RO_PASSWORD")
-    if not password:
-        return None
-    return (f"host={settings.pg_host} port={settings.pg_port} "
-            f"user={ROLE} password={password} dbname={settings.pg_database}")
+    return readonly_dsn() or None
 
 
 def run(dsn: str | None = None) -> dict:
@@ -310,8 +315,8 @@ def run(dsn: str | None = None) -> dict:
             "status": "NOT_CONFIGURED",
             "role": ROLE,
             "checked_at": datetime.now(UTC).isoformat(),
-            "reason": ("No read-only DSN configured. Set RRIP_RO_DSN, or "
-                       "RRIP_RO_PASSWORD to build one from the local settings."),
+            "reason": ("No read-only DSN configured. Set RRIP_PG_READONLY_DSN, "
+                       "the variable the API itself connects with."),
             "probes": [],
         }
     else:
