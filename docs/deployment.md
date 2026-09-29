@@ -110,6 +110,7 @@ Refresh is manual. The panel ended at day 711; the data does not change.
 | 4 | **Gemini API key for the hosted env** | already have | NL→SQL and narration | Set as an environment variable on the API host — **not** committed. The rotated key is fine. |
 | 5 | **GitHub repository** | — | CI already exists and needs somewhere to run | Currently local-only, no remote. |
 | 6 | **Read-only role on the published database** | Neon SQL editor or `psql` | The NL→SQL endpoint is public; the validator is defence in depth, the role is the boundary | Run [`sql/ddl/60_readonly_role.sql`](../sql/ddl/60_readonly_role.sql) **after** `rrip publish` creates the tables, then point `RRIP_PG_DSN` at `rrip_ro`. See below. |
+| 7 | **Limiter role on the published database** | Neon SQL editor or `psql` | The AI endpoints spend Gemini calls; without the counters they refuse on the published tier | Run [`sql/ddl/70_api_limits.sql`](../sql/ddl/70_api_limits.sql) **after** step 6, then set `RRIP_LIMITER_DSN` and `RRIP_TRUSTED_IP_HEADER=x-real-ip` in the Vercel environment. See below. |
 
 **Not needed:** any domain, any Anthropic key.
 
@@ -142,6 +143,37 @@ psql "$RRIP_PG_DSN" -c "SELECT count(*) FROM pub_headline"   # must succeed
 
 Two failures and one success is the passing result. If the first two succeed,
 the API is still connecting as the owner and the boundary does not exist.
+
+### The limiter role is not optional either
+
+The AI endpoints spend model calls on the project's Gemini key, and anyone can
+reach them. `src/rrip/api/limits.py` bounds that with a per-IP rate limit and a
+global daily cap, both counted in Postgres because serverless instances share
+no memory. The counters need writes, which `rrip_ro` must never have, so they
+get their own role:
+
+```bash
+psql "$RRIP_PUBLISH_DSN" -v limiter_password='<generate one>' -f sql/ddl/70_api_limits.sql
+```
+
+Then, in the Vercel project environment (never committed):
+
+| Variable | Value |
+|---|---|
+| `RRIP_LIMITER_DSN` | the Neon DSN with the user and password swapped for `rrip_limiter` |
+| `RRIP_TRUSTED_IP_HEADER` | `x-real-ip` |
+| `RRIP_CORS_ORIGINS` | the deployed site's origin, e.g. `https://<project>.vercel.app` -- the same list gates the AI endpoints' origin check |
+| `RRIP_AI_RATE_LIMIT`, `RRIP_AI_RATE_WINDOW_SECONDS`, `RRIP_LLM_DAILY_CAP` | optional; defaults 10 per 60 s and 300 calls per UTC day |
+
+On the published tier the AI endpoints **refuse** until `RRIP_LIMITER_DSN` is
+set, and refuse while the counter store is unreachable. That is deliberate: a
+limiter that switches itself off when its database is down is bypassed by an
+outage. `GET /api/v1/ai/status` reports `"protection": "on"` once it is wired,
+without spending a model call -- check it after every deploy.
+
+`x-real-ip` is trusted because Vercel sets it at its edge. Verify that at the
+first deploy: a request sending its own `x-real-ip` must still be bucketed under
+its real address.
 
 ### Choosing an API host
 

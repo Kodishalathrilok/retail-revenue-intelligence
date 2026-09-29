@@ -105,6 +105,23 @@ jobs:
       - name: Calendar checks pass
         run: python -m rrip.cli quality --category time_model
 
+      - name: Apply limiter DDL (twice -- it must be idempotent)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for i in 1 2; do
+            psql -h localhost -U postgres -d rrip -v ON_ERROR_STOP=1 -q \
+                 -v limiter_password=ci-limiter -f sql/ddl/70_api_limits.sql
+          done
+
+      - name: Limiter counters against real Postgres
+        # RRIP_REQUIRE_LIMITER_DB turns a missing DSN into a failure, so these
+        # cannot pass here by skipping.
+        env:
+          RRIP_TEST_LIMITER_DSN: postgresql://rrip_limiter:ci-limiter@localhost:5432/rrip
+          RRIP_REQUIRE_LIMITER_DB: "1"
+        run: pytest -q tests/test_api_limits_db.py
+
       - name: Quality check definitions are well-formed
         run: pytest -q tests/test_quality.py
 
