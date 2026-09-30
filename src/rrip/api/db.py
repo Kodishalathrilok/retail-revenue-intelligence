@@ -83,11 +83,26 @@ def conninfo() -> str:
 async def open_pool() -> AsyncConnectionPool:
     global _pool
     if _pool is None:
+        # Neon drops idle connections (scale-to-zero after 5 idle minutes), and
+        # a serverless instance can sit frozen far longer than that. Without a
+        # check the pool handed such a connection to the next request, which
+        # failed; the pool only noticed on return ("discarding closed
+        # connection"). So:
+        #   check         -- one round trip at checkout; a dead connection is
+        #                    replaced before the request ever sees it.
+        #   min_size=0,   -- hold nothing while idle; an unused connection is
+        #   max_idle=120     closed 2-4 min after last use, before Neon does.
+        #                    (Only the check survives a frozen instance -- no
+        #                    timer runs while frozen.)
+        #   connect_timeout -- psycopg defaults to 130 s; a reconnect stuck
+        #                    across a freeze must fail inside Vercel's 60 s.
         _pool = AsyncConnectionPool(
             conninfo(),
-            min_size=2,
+            min_size=0,
             max_size=10,
-            kwargs={"row_factory": dict_row},
+            max_idle=120,
+            check=AsyncConnectionPool.check_connection,
+            kwargs={"row_factory": dict_row, "connect_timeout": 5},
             open=False,
         )
         await _pool.open(wait=True, timeout=15)
