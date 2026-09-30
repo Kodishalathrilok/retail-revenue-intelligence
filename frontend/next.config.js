@@ -19,6 +19,11 @@ module.exports = {
     // uvicorn process during `next dev`.
     if (process.env.VERCEL) return [];
     const api = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8010';
-    return [{ source: '/api/:path*', destination: `${api}/api/:path*` }];
+    // /health too: the Ask page reads the data tier from it for its evidence,
+    // and vercel.json already routes it in production.
+    return [
+      { source: '/api/:path*', destination: `${api}/api/:path*` },
+      { source: '/health', destination: `${api}/health` },
+    ];
   },
 };

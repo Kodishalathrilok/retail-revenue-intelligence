@@ -1,60 +1,121 @@
 'use client';
 
 /**
- * NL query view.
+ * Ask -- the product's primary interaction.
  *
- * The point of this screen is the validation trail, not the answer. Every gate
- * the generated SQL passed or failed is shown, along with each retry and the
- * error text fed back to the model. A rejected query is a successful outcome
- * for this interface, so rejections are rendered as prominently as results.
+ * question → progress → answer → chart (only when the result's shape supports
+ * one) → rows → "Why should I trust this?" → limitations.
+ *
+ * This page used to lead with the validation trail and put the result last.
+ * The trail is still here, one click deep inside the evidence: it is what
+ * makes the answer trustworthy, but it is not the answer. Every figure on the
+ * page is formatted from the rows PostgreSQL returned (lib/answer.mjs); the
+ * language model only drafted the SQL.
  */
 
-import { useState } from 'react';
-import { CaveatBar } from '@/components/Caveats';
-import { Callout, ErrorState } from '@/components/ui';
-import { ApiError, post } from '@/lib/api';
+import Link from 'next/link';
+import { useEffect, useId, useState } from 'react';
+import {
+  AnswerCard, AskProgress, EvidencePanel, ResultChart, ResultTable, TABLE_ROWS_SHOWN,
+  ValidationTrail, type Health, type QueryResult,
+} from '@/components/ask';
+import { Callout, Disclosure, ErrorState, type Tone } from '@/components/ui';
+import { answerSentence, chartSpec, evidence, outcome } from '@/lib/answer.mjs';
+import { ApiError, get, post } from '@/lib/api';
+import { EXAMPLES } from '@/lib/examples';
 
-type Stage = { stage: string; passed: boolean; detail: string; duration_ms: number | null };
-type Attempt = {
-  attempt: number; sql: string; stages: Stage[];
-  rejected_reason: string | null; error_fed_back: string | null;
-};
-type Result = {
-  question: string; succeeded: boolean; sql: string | null;
-  columns: string[]; rows: Record<string, unknown>[]; row_count: number;
-  attempts: Attempt[]; total_duration_ms: number; provider: string | null;
-  failure_reason: string | null;
-};
+// NLQueryRequest: question must be 3..500 characters.
+const MIN_LEN = 3;
+const MAX_LEN = 500;
 
-// Every positive example is a published-tier benchmark case (pub-02, pub-01,
-// pub-03 in src/rrip/eval/cases.py), because the hosted demo only has the pub_*
-// aggregates. tests/test_demo_examples.py fails if one stops being a case. The
-// last example is adversarial and must be refused by the router.
-const EXAMPLES = [
-  'Which 5 departments have the highest total revenue?',
-  'What is the total revenue across all weeks?',
-  'How many RFM segments are there?',
-  'Delete every transaction from the database',
-];
-
-const GATE_HELP: Record<string, string> = {
-  shape: 'Exactly one statement, and it must be a SELECT',
-  keywords: 'No DDL, DML or dangerous functions (checked with strings and comments stripped)',
-  explain: 'EXPLAIN without ANALYZE; rejected above a cost ceiling',
-  execute: 'Runs under a hard statement timeout and a row cap',
-  result_shape: 'Result must have columns and must not be truncated',
+const TONE: Record<string, Tone> = {
+  refused: 'caution', unsupported: 'neutral', ambiguous: 'neutral', too_broad: 'caution',
+  forecast: 'accent', unanswerable: 'neutral', failed: 'negative',
 };
 
-export default function QueryPage() {
-  const [q, setQ] = useState(EXAMPLES[0]);
-  const [res, setRes] = useState<Result | null>(null);
+// Refusals from the abuse protection carry visitor-ready text; these are only
+// the headings above it.
+const REFUSAL_TITLE: Record<string, string> = {
+  RATE_LIMITED: 'Too many questions in a short time',
+  DAILY_LLM_CAP: "Today's AI limit has been reached",
+  AI_PROTECTION_UNAVAILABLE: 'AI answers are temporarily unavailable',
+  AI_UNAVAILABLE: 'AI answers are temporarily unavailable',
+  ORIGIN_NOT_ALLOWED: 'Not available from here',
+};
+
+function Outcome({ res, asked, health }: { res: QueryResult; asked: string; health: Health }) {
+  const o = outcome(res);
+
+  if (o.kind === 'answer') {
+    const spec = chartSpec(res);
+    return (
+      <div className="space-y-4">
+        <p className="text-xs text-muted">
+          You asked: <span className="text-ink-2">{asked}</span>
+        </p>
+        <AnswerCard sentence={answerSentence(res)} result={res} />
+        {spec && <ResultChart spec={spec} result={res} />}
+        {res.rows.length > 0 && <ResultTable result={res} />}
+        <EvidencePanel e={evidence(res, health, TABLE_ROWS_SHOWN)} attempts={res.attempts} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted">
+        You asked: <span className="text-ink-2">{asked}</span>
+      </p>
+      <Callout tone={TONE[o.kind] ?? 'neutral'} title={o.title}>
+        {o.message && <p>{o.message}</p>}
+        {o.clarification && (
+          <p className="mt-2">
+            <span className="font-medium text-ink">What you can ask instead: </span>
+            {o.clarification}
+          </p>
+        )}
+        {o.kind === 'forecast' && (
+          <p className="mt-2">
+            <Link href="/forecast" className="font-medium text-accent underline underline-offset-2">
+              Open the forecast
+            </Link>
+          </p>
+        )}
+      </Callout>
+      {o.kind === 'failed' && res.attempts.length > 0 && (
+        <Disclosure summary="What was tried (technical)">
+          <ValidationTrail attempts={res.attempts} />
+        </Disclosure>
+      )}
+    </div>
+  );
+}
+
+export default function AskPage() {
+  const id = useId();
+  const [q, setQ] = useState('');
+  const [asked, setAsked] = useState('');
+  const [res, setRes] = useState<QueryResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const [health, setHealth] = useState<Health>(null);
 
-  async function run() {
-    setBusy(true); setErr(null); setRes(null);
+  useEffect(() => {
+    // ?q= pre-fills the question (links from other pages); it never auto-runs,
+    // so arriving at a link does not spend a model call.
+    const pre = new URLSearchParams(window.location.search).get('q');
+    if (pre) setQ(pre.slice(0, MAX_LEN));
+    // The data-tier line in the evidence. If /health cannot be read, the
+    // evidence says the tier was not reported rather than asserting one.
+    get<Health>('/health').then(setHealth).catch(() => setHealth(null));
+  }, []);
+
+  async function ask(question: string) {
+    const text = question.trim();
+    if (text.length < MIN_LEN || busy) return;
+    setQ(text); setAsked(text); setBusy(true); setErr(null); setRes(null);
     try {
-      setRes(await post<Result>('/api/v1/ai/query', { question: q, max_attempts: 2 }));
+      setRes(await post<QueryResult>('/api/v1/ai/query', { question: text, max_attempts: 2 }));
     } catch (e) {
       setErr(e);
     } finally {
@@ -63,136 +124,86 @@ export default function QueryPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Natural language query</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          The model proposes SQL. It never executes anything and never computes a
-          number — every value below was produced by Postgres.
+    <div className="max-w-4xl space-y-8">
+      <header>
+        <p className="font-mono text-2xs uppercase tracking-[0.08em] text-muted">
+          Ask · published aggregate data
         </p>
-      </div>
+        <h1 className="mt-2 font-display text-3xl leading-tight text-ink sm:text-4xl">Ask the data</h1>
+        <p className="mt-3 max-w-[65ch] text-base text-ink-2">
+          Ask a business question in plain English. A language model drafts the SQL and never
+          computes a number: PostgreSQL does, after the query passes read-only validation checks.
+          The evidence behind every answer is one click away.
+        </p>
+      </header>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-5">
+      <form
+        onSubmit={(e) => { e.preventDefault(); ask(q); }}
+        className="rounded-card border border-rule bg-paper p-5"
+      >
+        <label htmlFor={id} className="block text-sm font-medium text-ink">Your question</label>
         <textarea
-          value={q} onChange={(e) => setQ(e.target.value)} rows={2}
-          className="w-full resize-none rounded-md border border-slate-300 bg-white p-3 text-sm text-slate-900 placeholder:text-slate-400"
+          id={id}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(q); }
+          }}
+          maxLength={MAX_LEN}
+          rows={2}
+          aria-describedby={`${id}-hint`}
+          placeholder="e.g. Which 5 departments have the highest total revenue?"
+          className="mt-2 w-full resize-y rounded-input border border-rule bg-paper p-3 text-base text-ink"
         />
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button onClick={run} disabled={busy}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">
-            {busy ? 'Running…' : 'Run'}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <p id={`${id}-hint`} className="text-xs text-muted">
+            Enter to ask · Shift+Enter for a new line · {q.length}/{MAX_LEN}
+          </p>
+          <button
+            type="submit"
+            disabled={busy || q.trim().length < MIN_LEN}
+            className="min-h-control rounded-input bg-ink px-6 text-sm font-medium text-paper hover:bg-ink-2 disabled:opacity-40"
+          >
+            {busy ? 'Working…' : 'Ask'}
           </button>
-          {EXAMPLES.map((e) => (
-            <button key={e} onClick={() => setQ(e)}
-              className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
-              {e.length > 42 ? `${e.slice(0, 42)}…` : e}
-            </button>
-          ))}
         </div>
-        <p className="mt-2 text-xs text-slate-400">
-          The last example is adversarial — it should be rejected, or answered
-          with a harmless SELECT.
+      </form>
+
+      <section aria-labelledby={`${id}-examples`}>
+        <h2 id={`${id}-examples`} className="text-sm font-medium text-ink-2">Verified questions</h2>
+        <p className="mt-1 text-xs text-muted">
+          Each one is checked against a reference answer on the published data.
         </p>
-      </div>
-
-      {/* A refusal (rate limit, daily cap, AI unavailable) is expected product
-          behaviour with a visitor-ready message, so it reads as a notice; only
-          an unexplained failure is an error. The developer hint that used to be
-          appended here ("is the API running…") is gone from the public site. */}
-      {err instanceof ApiError && err.code ? (
-        <Callout tone="caution" title="Not answered">{err.message}</Callout>
-      ) : err != null ? (
-        <ErrorState error={err} what="an answer" onRetry={run} />
-      ) : null}
-
-      {res && (
-        <>
-          <div className={`rounded-lg border p-4 ${res.succeeded
-            ? 'border-emerald-200 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
-            <div className="flex items-center gap-3">
-              <span className={`rounded px-2 py-0.5 text-xs font-semibold ${res.succeeded
-                ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'}`}>
-                {res.succeeded ? 'ACCEPTED' : 'REJECTED'}
-              </span>
-              <span className="text-sm text-slate-600">
-                {res.attempts.length} attempt{res.attempts.length === 1 ? '' : 's'} ·{' '}
-                {res.total_duration_ms.toFixed(0)} ms · provider {res.provider}
-              </span>
-            </div>
-            {res.failure_reason && (
-              <p className="mt-2 text-sm text-amber-800">{res.failure_reason}</p>
-            )}
-          </div>
-
-          {res.attempts.map((a) => (
-            <section key={a.attempt} className="rounded-lg border border-slate-200 bg-white p-5">
-              <h2 className="text-sm font-semibold">
-                Attempt {a.attempt}
-                {a.rejected_reason && (
-                  <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-normal text-amber-800">
-                    rejected
-                  </span>
-                )}
-              </h2>
-
-              <pre className="mt-3 overflow-x-auto rounded bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">
-                {a.sql}
-              </pre>
-
-              <ol className="mt-4 space-y-1.5">
-                {a.stages.map((s) => (
-                  <li key={s.stage} className="flex items-start gap-3 text-sm">
-                    <span className={`mt-0.5 w-16 shrink-0 rounded px-1.5 py-0.5 text-center text-[10px] font-semibold ${
-                      s.passed ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                      {s.passed ? 'PASS' : 'REJECT'}
-                    </span>
-                    <span className="w-28 shrink-0 font-mono text-xs text-slate-700">{s.stage}</span>
-                    <span className="text-xs text-slate-600">
-                      {s.detail}
-                      <span className="block text-slate-400">{GATE_HELP[s.stage]}</span>
-                    </span>
-                  </li>
-                ))}
-              </ol>
-
-              {a.error_fed_back && (
-                <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
-                  <div className="text-xs font-semibold text-slate-600">Fed back to the model</div>
-                  <div className="mt-1 font-mono text-xs text-slate-700">{a.error_fed_back}</div>
-                </div>
-              )}
-            </section>
+        <ul className="mt-3 flex flex-wrap gap-2">
+          {EXAMPLES.map((ex) => (
+            <li key={ex.question}>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => ask(ex.question)}
+                className="min-h-control rounded-input border border-rule bg-paper px-3 py-2 text-left text-sm text-ink-2 hover:border-rule-firm hover:text-ink disabled:opacity-40"
+              >
+                {ex.refusal && <span className="mr-1.5 font-semibold text-caution">Safety check:</span>}
+                {ex.question}
+              </button>
+            </li>
           ))}
+        </ul>
+      </section>
 
-          {res.succeeded && res.rows.length > 0 && (
-            <section className="rounded-lg border border-slate-200 bg-white p-5">
-              <h2 className="text-sm font-semibold">
-                Result — {res.row_count} row{res.row_count === 1 ? '' : 's'}
-              </h2>
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                      {res.columns.map((c) => <th key={c} className="py-2 pr-4">{c}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {res.rows.slice(0, 50).map((r, i) => (
-                      <tr key={i} className="border-b border-slate-100">
-                        {res.columns.map((c) => (
-                          <td key={c} className="py-1.5 pr-4 tabular-nums">{String(r[c])}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-        </>
-      )}
+      <div className="space-y-4">
+        {busy && <AskProgress />}
 
-      <CaveatBar calendar revenue />
+        {!busy && err instanceof ApiError && err.code ? (
+          <Callout tone="caution" title={REFUSAL_TITLE[err.code] ?? 'Not answered'}>
+            {err.message}
+          </Callout>
+        ) : !busy && err != null ? (
+          <ErrorState error={err} what="an answer" onRetry={() => ask(asked)} />
+        ) : null}
+
+        {!busy && res && <Outcome res={res} asked={asked} health={health} />}
+      </div>
     </div>
   );
 }
