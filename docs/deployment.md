@@ -106,7 +106,7 @@ Refresh is manual. The panel ended at day 711; the data does not change.
 |---|---|---|---|---|
 | 1 | **Neon account + connection string** | [neon.tech](https://neon.tech) | Hosted Postgres for the `pub_*` tables | Free tier. Create the project with **C collation** if the option is offered, so ordering matches local. Put the DSN in `.env` as `RRIP_PUBLISH_DSN`. |
 | 2 | **Vercel account** | [vercel.com](https://vercel.com) | Next.js frontend hosting | Free Hobby tier. Connect it to the GitHub repo; set root directory to `frontend/`. |
-| 3 | **A host for the FastAPI service** | Cloud Run, Render or Fly.io | The API is Python, so Vercel cannot host it | **Fly.io has no free tier** -- it was removed in 2024, and new accounts get a 2-hour trial then need a card (~$2-5/month). See the comparison below. |
+| 3 | ~~A host for the FastAPI service~~ | -- | **Superseded:** the API runs as a Vercel Python function (`frontend/api/index.py`) on the same origin as the frontend. The host comparison below is kept for the record. | The function installs `rrip` at an **exact commit** (`frontend/api/requirements.txt`), never `@main`. |
 | 4 | **Gemini API key for the hosted env** | already have | NL→SQL and narration | Set as an environment variable on the API host — **not** committed. The rotated key is fine. |
 | 5 | **GitHub repository** | — | CI already exists and needs somewhere to run | Currently local-only, no remote. |
 | 6 | **Read-only role on the published database** | Neon SQL editor or `psql` | The NL→SQL endpoint is public; the validator is defence in depth, the role is the boundary | Run [`sql/ddl/60_readonly_role.sql`](../sql/ddl/60_readonly_role.sql) **after** `rrip publish` creates the tables, then set `RRIP_PG_READONLY_DSN` to a DSN for `rrip_ro`, and do **not** give the API `RRIP_PG_DSN` at all. See below. |
@@ -178,9 +178,101 @@ limiter that switches itself off when its database is down is bypassed by an
 outage. `GET /api/v1/ai/status` reports `"protection": "on"` once it is wired,
 without spending a model call -- check it after every deploy.
 
-`x-real-ip` is trusted because Vercel sets it at its edge. Verify that at the
-first deploy: a request sending its own `x-real-ip` must still be bucketed under
-its real address.
+`x-vercel-forwarded-for` is trusted because Vercel sets it at its edge: its
+request-header documentation states that it overwrites `x-forwarded-for` and
+does not forward external IPs, to prevent spoofing, and that
+`x-vercel-forwarded-for` carries the same value but cannot be overwritten even by
+a proxy placed in front of Vercel. That was then verified on the deployment, not
+assumed -- see below.
+
+## Verified deployment (2026-09-30)
+
+```
+Browser
+  │
+Vercel edge ── sets x-vercel-forwarded-for; client-supplied forwarding headers discarded
+  │
+FastAPI (Vercel Python function, rrip pinned to an exact commit)
+  ├── origin check          RRIP_CORS_ORIGINS; friction, not identity
+  ├── per-IP rate limit ──► Postgres, as rrip_limiter (two counter tables only)
+  ├── daily LLM cap     ──► Postgres, as rrip_limiter; charged per paid model attempt
+  ├── NL->SQL gates         single SELECT, keyword/function allowlist, EXPLAIN cost, row cap
+  └── analysis          ──► Postgres, as rrip_ro (SELECT on pub_* only)
+                        ──► Gemini (model fallback chain); failure -> explicit 503 AI_UNAVAILABLE
+```
+
+`https://retail-revenue-intelligence-flame.vercel.app`, published tier, 23
+`pub_*` tables republished 2026-09-29. Production environment:
+`RRIP_TIER`, `RRIP_PG_READONLY_DSN`, `RRIP_LIMITER_DSN`, `GEMINI_API_KEY`,
+`RRIP_CORS_ORIGINS`, `RRIP_TRUSTED_IP_HEADER=x-vercel-forwarded-for`,
+`RRIP_LLM_DAILY_CAP=300`. No owner credential (`RRIP_PG_DSN`) is present.
+
+**Before this pass**, production ran code without any AI endpoint protection
+(the function tracked `@main`), with a live Gemini key, and its NL->SQL
+endpoint connected as the Neon owner (no `rrip_*` role existed). The key was
+pulled first; the hardened build replaced it.
+
+### Database roles, verified in production
+
+`rrip verify-role` through the production `RRIP_PG_READONLY_DSN`: **VERIFIED,
+16/16**, connected as `rrip_ro`, tier `published`. Refused by Postgres itself:
+INSERT/UPDATE/DELETE/TRUNCATE/DROP on `pub_dim_store`, CREATE TABLE/FUNCTION,
+ALTER ROLE SUPERUSER, GRANT to self (no effect), `query_to_xml` write and
+`pg_authid` read, `pg_read_file`, `pg_authid` directly, and reading the limiter
+counters. Allowed: SELECT on `pub_weekly_revenue` and `pub_dim_store`. Role
+`statement_timeout` default 120 s (a default, not a boundary). `rrip_limiter`
+can write the two counter tables and nothing else; `rrip_ro` cannot read them.
+
+### Public API security matrix (from source)
+
+| Endpoint | Calls LLM? | Rate limited? | Daily cap? | Origin checked? | DB touched? |
+|---|---|---|---|---|---|
+| `POST /api/v1/ai/query` | yes, up to 3 attempts | yes | yes, per attempt | yes | `rrip_ro` (EXPLAIN + execute), `rrip_limiter` |
+| `POST /api/v1/ai/ask` | only if the matcher finds no department | yes | yes, when called | yes | `rrip_ro` (`pub_forecast*`), `rrip_limiter` |
+| `POST /api/v1/ai/narrate` | yes | yes | yes | yes | `rrip_limiter` only |
+| `GET /api/v1/causal/analysis/{id}?propose=true` | local tier only; published returns precomputed results first | yes (local) | yes (local) | yes (local) | `rrip_ro` |
+| `GET /api/v1/ai/status` | no | no | no | no | no |
+
+`tests/test_api_limits.py` walks the app's routes and fails if any route that
+obtains a provider is unprotected.
+
+### Smoke test against production (`rrip smoke`, 2026-09-30)
+
+All 13 checks passed on the final run; the two earlier runs found one real bug
+and one test bug, both fixed.
+
+| Test | Result |
+|---|---|
+| A liveness / readiness / protection / analytics | 200, 23 tables, `protection: on`, overview from `pub_*` |
+| B NL->SQL benchmark prompt pub-02 | 200, 5 rows, ~4.0-4.6 s end to end |
+| C adversarial prompt | refused by the router, no model call |
+| D per-IP limit | request 11 in one window -> 429 |
+| E daily cap (test cap 6) | 429 `DAILY_LLM_CAP` once reached |
+| F foreign origin | 403 `ORIGIN_NOT_ALLOWED` |
+| G analytics while AI is capped | 200 |
+| H warm / concurrent | 20 sequential p50 ~300 ms, p95 ~360-570 ms; 15 concurrent all 200, p50 533 ms warm (~3 s while the platform scaled from cold) |
+| I spoofed client IP | every request carried a new spoofed IP in all three forwarding headers; still 429 at 11 |
+
+**Client IP, verified in the database:** 33 requests carrying 33 different
+spoofed addresses across three runs produced **one** bucket in `api_rate_limit`
+-- spoofing buys nothing, and the proxy-derived address is what is counted.
+**Not verified in production:** that two different real clients get separate
+buckets; there was only one client host, with no IPv6 route. It is covered
+against real Postgres by `tests/test_api_limits_db.py`.
+
+**Daily cap semantics, observed:** eight identical `/ask` questions charged the
+counter only on cache misses -- cache hits are free by design. The counter reads
+one past the cap after a refusal; the refused call never reached the provider.
+
+**Analytics pool on serverless:** cold, 20 warm sequential, 15 concurrent, three
+runs -- no failures, no 5xx, and no error or warning in the production runtime
+logs. Left unchanged.
+
+**Found and fixed by the smoke test:** `/ask` read the on-disk forecast
+artifact, which the function does not have, so every forecast question returned
+503 in production; it now reads `pub_forecast*` on the published tier.
+
+After testing, the day's counter was reset and the cap raised to 300.
 
 ### Choosing an API host
 

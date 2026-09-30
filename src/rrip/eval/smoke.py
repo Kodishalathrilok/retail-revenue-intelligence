@@ -149,9 +149,14 @@ async def run(base_url: str, origin: str, rate_limit: int, window_s: int,
         rep.latency["nl2sql_one_prompt_ms"] = {"ms": round(ms)}
 
         # --- E: spend the rest of the (test-sized) cap, expect DAILY_LLM_CAP ------
+        # Each attempt must be a DISTINCT prompt: repeating one question is
+        # served from the provider cache after the first call, and cache hits
+        # are (correctly) not charged -- the first version of this test
+        # never reached the cap for exactly that reason.
         seen = None
-        for _ in range(daily_cap + 2):
-            r, ms = await _timed(c, "POST", "/api/v1/ai/ask", json={"question": NEEDS_MODEL},
+        for i in range(daily_cap + 2):
+            q = f"{NEEDS_MODEL} (smoke {i} {uuid.uuid4().hex[:8]})"
+            r, ms = await _timed(c, "POST", "/api/v1/ai/ask", json={"question": q},
                                  headers=post_headers)
             if r.status_code == 429 and r.json().get("error") == "DAILY_LLM_CAP":
                 seen = (r.status_code, ms)

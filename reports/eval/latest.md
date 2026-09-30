@@ -1,6 +1,6 @@
 # RRIP evaluation report
 
-Generated 2026-09-29T13:54:12+00:00.
+Generated 2026-09-30T10:36:24+00:00.
 
 Every figure below was produced by a run recorded in `reports/eval/`. Anything that could not be measured says so.
 
@@ -121,7 +121,7 @@ Discordant cases as recorded:
 
 Role `rrip_ro`: **VERIFIED**
 
-15/15 probes passed. 13 refusals came from PostgreSQL itself rather than from the application validator — the probes run raw SQL and never touch the gates, so this measures the database boundary alone.
+16/16 probes passed. 14 refusals came from PostgreSQL itself rather than from the application validator — the probes run raw SQL and never touch the gates, so this measures the database boundary alone.
 
 | probe | expected | outcome | refused by |
 |---|---|---|---|
@@ -138,8 +138,9 @@ Role `rrip_ro`: **VERIFIED**
 | pg_read_file on the server filesystem | denied | denied | database |
 | read credential material from pg_authid | denied | denied | database |
 | GRANT INSERT to self | denied | denied | database |
-| SELECT from a fact table | allowed | allowed | nobody |
-| SELECT from a dimension | allowed | allowed | nobody |
+| SELECT from the limiter's counters | denied | denied | database |
+| SELECT from a fact table (fact_transactions) | allowed | allowed | nobody |
+| SELECT from a dimension (dim_store) | allowed | allowed | nobody |
 
 Role `statement_timeout` default: 120,000 ms (expected 120,000 ms, ok). A default, not a boundary: any session can override it with `SET`, and the API does. What stops generated SQL from changing it is the application gates (single `SELECT`, `set_config` forbidden).
 
@@ -180,5 +181,5 @@ The violated-parallel-trends and short-pre-period scenarios are included because
 
 Stated rather than omitted:
 
-- **Published (Neon) tier.** Every figure here is the `local` tier. The read-only role has been verified against the local database only.
+- **Published (Neon) tier.** Every figure here is the `local` tier. The read-only role table above is the local run; the production role check and the deployment smoke test are recorded in `docs/deployment.md`.
 - **Cold-cache latency.** See the note in the latency section.

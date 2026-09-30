@@ -2,11 +2,10 @@
 
 **Repository:** https://github.com/Kodishalathrilok/retail-revenue-intelligence
 
-> **Deployment status: not yet live.** The aggregate tier is built and measured
-> (14.6 MB, 120,800 rows across 23 tables) and the hosting plan is in
-> [`docs/deployment.md`](docs/deployment.md), but nothing is deployed — see
-> *What runs where* below for exactly what a hosted visitor would and would not
-> be able to do.
+> **Live:** https://retail-revenue-intelligence-flame.vercel.app — the published
+> aggregate tier (23 tables). What a hosted visitor can and cannot do is under
+> *What runs where* below; the verified deployment, its roles and its smoke-test
+> results are in [`docs/deployment.md`](docs/deployment.md).
 
 Analytics platform over the dunnhumby *Complete Journey* household panel:
 2,595,732 transactions and 36,771,279 rows of promotional exposure across 2,500
