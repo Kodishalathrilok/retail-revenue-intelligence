@@ -99,6 +99,23 @@ class Settings(BaseSettings):
         default="http://localhost:3000,http://127.0.0.1:3000",
         alias="RRIP_CORS_ORIGINS")
 
+    # --- Abuse protection for the LLM-backed endpoints (rrip.api.limits) ---
+    #
+    # DSN for rrip_limiter, the only role allowed to write the counters
+    # (sql/ddl/70_api_limits.sql). Set  -> protection on, and it fails closed
+    # when the database cannot be reached. Unset on the published tier -> the AI
+    # endpoints refuse (a public deployment without protection is a
+    # misconfiguration). Unset locally -> off, for development.
+    limiter_dsn: str = Field(default="", alias="RRIP_LIMITER_DSN")
+    ai_rate_limit: int = Field(default=10, ge=1, alias="RRIP_AI_RATE_LIMIT")
+    ai_rate_window_seconds: int = Field(default=60, ge=1,
+                                        alias="RRIP_AI_RATE_WINDOW_SECONDS")
+    llm_daily_cap: int = Field(default=300, ge=0, alias="RRIP_LLM_DAILY_CAP")
+    # Header carrying the client IP, trusted ONLY when set. Behind Vercel use
+    # x-real-ip, which the platform sets itself; anywhere a client can reach the
+    # API directly, leave empty so a forged header cannot pick its own bucket.
+    trusted_ip_header: str = Field(default="", alias="RRIP_TRUSTED_IP_HEADER")
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

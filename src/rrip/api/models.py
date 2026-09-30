@@ -96,6 +96,29 @@ class NLQueryRequest(BaseModel):
     max_attempts: int = Field(default=2, ge=1, le=3)
 
 
+# The serialised payload becomes the prompt, and prompt size is cost. 20k
+# characters is several hundred result rows -- more than a narration can use.
+NARRATE_MAX_CHARS = 20_000
+
+
+class NarrateRequest(BaseModel):
+    """Body for POST /ai/narrate. Previously a bare dict, so any size went in."""
+
+    data: Any
+    question: str = Field(default="Explain these results.", min_length=3,
+                          max_length=500)
+
+    @field_validator("data")
+    @classmethod
+    def _bounded(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("data is required")
+        if len(json.dumps(v, default=str)) > NARRATE_MAX_CHARS:
+            raise ValueError(f"data exceeds {NARRATE_MAX_CHARS:,} characters "
+                             "when serialised; narrate an aggregate instead")
+        return v
+
+
 class ValidationStage(BaseModel):
     stage: str
     passed: bool

@@ -2,21 +2,46 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from rrip.ai.narration import narrate
 from rrip.ai.nl2sql import answer
-from rrip.ai.provider import LLMUnavailable, get_provider
+from rrip.ai.provider import CallRefused, LLMError, LLMUnavailable, get_provider
+from rrip.api import limits
 from rrip.api.db import fetch
-from rrip.api.models import NLQueryRequest, NLQueryResponse
+from rrip.api.models import NarrateRequest, NLQueryRequest, NLQueryResponse
+from rrip.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/ai", tags=["ai"])
 
+# Every route that can reach a model carries this: origin check, then the
+# shared per-IP limit. The daily cap is enforced per model call, inside the
+# provider that guarded_provider() returns.
+PROTECTED = [Depends(limits.protect)]
+
+_PROVIDER_DOWN = "The language model provider is unavailable. Try again shortly."
+
 
 def _provider(name: str | None = None):
-    return get_provider(name, use_cache=os.getenv("RRIP_LLM_CACHE", "1") != "0")
+    return limits.guarded_provider(name)
+
+
+def _public_reason(reason: str | None) -> str | None:
+    """Provider failures are logged in full and reported generically.
+
+    The raw text is an upstream error body, useful in a log and meaningless (or
+    revealing about the stack) in a response. Every other failure reason --
+    gate rejections, refusals -- is the product and is returned as is.
+    """
+    if reason and reason.startswith("provider error"):
+        logger.warning("NL->SQL %s", reason)
+        return _PROVIDER_DOWN
+    return reason
 
 
 @router.get("/status")
@@ -29,10 +54,13 @@ async def status() -> dict:
                     "requests_per_minute": p.limiter.requests_per_minute})
     return {"providers": out,
             "active": os.getenv("RRIP_LLM_PROVIDER", "gemini"),
-            "cache_enabled": os.getenv("RRIP_LLM_CACHE", "1") != "0"}
+            "cache_enabled": settings.llm_cache,
+            # on / off / misconfigured -- so a deployment smoke test can assert
+            # the AI endpoints are protected without triggering a model call.
+            "protection": limits.mode()}
 
 
-@router.post("/query", response_model=NLQueryResponse)
+@router.post("/query", response_model=NLQueryResponse, dependencies=PROTECTED)
 async def nl_query(req: NLQueryRequest, provider: str | None = None) -> NLQueryResponse:
     """Natural language to SQL, with every validation stage reported.
 
@@ -48,7 +76,8 @@ async def nl_query(req: NLQueryRequest, provider: str | None = None) -> NLQueryR
     try:
         result = await answer(req.question, p, max_attempts=req.max_attempts)
     except LLMUnavailable as exc:
-        raise HTTPException(503, str(exc)) from exc
+        logger.warning("NL->SQL provider unavailable: %s", exc)
+        raise HTTPException(503, _PROVIDER_DOWN) from exc
 
     return NLQueryResponse(
         question=result.question,
@@ -68,33 +97,28 @@ async def nl_query(req: NLQueryRequest, provider: str | None = None) -> NLQueryR
         } for a in result.attempts],
         total_duration_ms=result.total_duration_ms,
         provider=result.provider,
-        failure_reason=result.failure_reason,
+        failure_reason=_public_reason(result.failure_reason),
     )
 
 
-@router.post("/narrate")
-async def narrate_endpoint(payload: dict, provider: str | None = None) -> dict:
+@router.post("/narrate", dependencies=PROTECTED)
+async def narrate_endpoint(req: NarrateRequest, provider: str | None = None) -> dict:
     """Grounded narration over a computed result set.
 
     The caller supplies data that SQL already computed. If the model introduces
     any number absent from that data, the response is REJECTED rather than
     repaired, and the violations are returned so the guard is observable.
     """
-    data = payload.get("data")
-    question = payload.get("question", "Explain these results.")
-    if data is None:
-        raise HTTPException(400, "payload must include 'data'")
-
     try:
         p = _provider(provider)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    result = await narrate(data, question, p)
+    result = await narrate(req.data, req.question, p)
     return {
         "ok": result.ok,
         "narrative": result.narrative if result.ok else None,
-        "rejected_reason": result.rejected_reason,
+        "rejected_reason": _public_reason(result.rejected_reason),
         "violations": [{"value": v.value, "context": v.context, "reason": v.reason}
                        for v in result.violations],
         "provider": result.provider,
@@ -104,7 +128,7 @@ async def narrate_endpoint(payload: dict, provider: str | None = None) -> dict:
     }
 
 
-@router.post("/ask")
+@router.post("/ask", dependencies=PROTECTED)
 async def ask(payload: dict, provider: str | None = None) -> dict:
     """Route a question to SQL analytics or to the forecasting model.
 
@@ -149,9 +173,13 @@ async def ask(payload: dict, provider: str | None = None) -> dict:
             p = _provider(provider)
             if p.available:
                 intent = await FI.resolve_with_llm(question, store.departments, p)
-        except (ValueError, LLMUnavailable):
+        except CallRefused:
+            raise                   # rate limit or daily cap: say so
+        except (ValueError, LLMError):
             # The deterministic matcher already ran. A provider that is missing
-            # or refusing costs a clarification prompt, not an answer.
+            # or failing costs a clarification prompt, not an answer. LLMError,
+            # not only LLMUnavailable: any other provider failure used to
+            # escape as an unhandled 500.
             pass
 
     if not intent.is_complete:

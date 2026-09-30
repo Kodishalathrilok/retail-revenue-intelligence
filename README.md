@@ -529,6 +529,60 @@ because free-tier availability shifts: `gemini-2.0-flash` returns 429 quota
 exceeded on a new key and `gemini-2.5-flash` returns 404 for new users, while
 `gemini-flash-latest` works.
 
+### AI endpoint protection
+
+There are no user accounts and no login — this is a public demo, and nothing
+here is authentication. What is bounded is **cost**: how fast one client can
+spend model calls on the project's Gemini key, and how many the whole
+deployment can spend in a day.
+
+```
+AI request ──► origin check ──► per-IP rate limit ──► handler
+                                                        │
+                        each paid model attempt ──► daily global cap ──► provider
+```
+
+- **Every route that can reach a model is covered** — `/ai/query`, `/ai/ask`,
+  `/ai/narrate`, and `/causal/analysis?propose=true`. A test walks the app's
+  routes and fails if one obtains a provider without protection.
+- **Counters live in Postgres, not memory.** The API runs as serverless
+  functions; each instance has its own memory, so an in-process counter gives
+  every instance its own allowance and a fresh one on every cold start. A
+  single atomic upsert per check means concurrent requests get distinct counts —
+  tested with 40 simultaneous connections: exactly the limit pass, no increment
+  is lost.
+- **The daily cap counts paid attempts**, retries included and cache hits
+  excluded, and a refused call never reaches the provider, so concurrency cannot
+  overshoot it.
+- **The counters have their own role, `rrip_limiter`**, which can touch those
+  two tables and nothing else. `rrip_ro` stays SELECT-only — a writable table
+  behind the connection that executes model-proposed SQL would undo the
+  boundary above — and is explicitly denied the counters.
+- **The origin check is friction, not identity.** It stops another site from
+  spending the quota through its visitors' browsers; a script can send any
+  `Origin`, which is why the limit and the cap sit behind it.
+- **It fails closed.** On the published tier the AI endpoints refuse without the
+  limiter configured, and refuse while its database is unreachable — a limiter
+  an outage switches off is a limiter an outage bypasses. The dashboards never
+  touch it.
+
+Refusals are `429 RATE_LIMITED`, `429 DAILY_LLM_CAP`, `403 ORIGIN_NOT_ALLOWED`
+or `503 AI_PROTECTION_UNAVAILABLE`, as `{error, message, retry_after}` with a
+`Retry-After` header; `message` is written to be shown to a visitor and names no
+limits or configuration.
+
+| Variable | Default | |
+|---|---|---|
+| `RRIP_LIMITER_DSN` | — | DSN for `rrip_limiter`; set = on, unset locally = off |
+| `RRIP_AI_RATE_LIMIT` | 10 | AI requests per client per window |
+| `RRIP_AI_RATE_WINDOW_SECONDS` | 60 | window length |
+| `RRIP_LLM_DAILY_CAP` | 300 | model calls per UTC day, whole deployment |
+| `RRIP_TRUSTED_IP_HEADER` | — | `x-real-ip` behind Vercel; empty anywhere a client can forge it |
+
+```bash
+psql -U postgres -d rrip -v limiter_password='<choose one>' -f sql/ddl/70_api_limits.sql
+```
+
 ## What runs where
 
 The full 3.7 GB database does not fit any free hosted tier — `fact_causal` alone

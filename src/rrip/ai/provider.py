@@ -19,6 +19,7 @@ import random
 import tempfile
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -98,6 +99,11 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.limiter = RateLimiter(requests_per_minute=rpm)
         self.use_cache = use_cache
+        # Awaited before every paid attempt (not for cache hits). The API sets
+        # it to the shared daily-cap counter in rrip.api.limits; it raises a
+        # CallRefused to stop the call. None everywhere else -- the CLI and the
+        # benchmarks are not rationed.
+        self.budget: Callable[[], Awaitable[None]] | None = None
 
     @property
     def available(self) -> bool:
@@ -151,6 +157,10 @@ class LLMProvider(ABC):
         last_exc: Exception | None = None
         for attempt in range(1, max_retries + 1):
             await self.limiter.acquire()
+            # Outside the try below on purpose: that block retries on any
+            # exception, and a refused budget must end the call, not be retried.
+            if self.budget is not None:
+                await self.budget()
             t0 = time.perf_counter()
             try:
                 text = await self._call(prompt, system, temperature)
@@ -180,6 +190,24 @@ class LLMError(RuntimeError):
 
 class LLMUnavailable(LLMError):
     pass
+
+
+class CallRefused(LLMError):
+    """The request was refused by abuse protection before any model call.
+
+    Every LLM call site catches broad exceptions to report provider failures
+    as data; each re-raises this, so a refusal reaches the API as a refusal
+    instead of being recorded as a "provider error" or degraded around.
+    Carries only what is safe to show a client.
+    """
+
+    status = 503
+    code = "REFUSED"
+
+    def __init__(self, message: str, retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.public_message = message
+        self.retry_after = retry_after
 
 
 class RateLimited(LLMError):

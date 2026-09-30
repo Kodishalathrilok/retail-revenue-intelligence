@@ -50,7 +50,7 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from rrip.ai.provider import LLMProvider
+from rrip.ai.provider import CallRefused, LLMProvider
 from rrip.ai.router import classify
 from rrip.api.db import acquire
 
@@ -508,6 +508,8 @@ async def answer(question: str, provider: LLMProvider,
 
         try:
             resp = await provider.complete(prompt, system=schema_prompt())
+        except CallRefused:
+            raise                   # abuse protection, not a provider failure
         except Exception as exc:
             result.failure_reason = f"provider error: {type(exc).__name__}: {exc}"
             break
