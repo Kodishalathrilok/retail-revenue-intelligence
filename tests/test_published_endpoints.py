@@ -33,3 +33,18 @@ def test_causal_validation_is_an_explicit_local_only_refusal(monkeypatch) -> Non
     detail = r.json()["detail"]
     assert detail["error"] == "LOCAL_ONLY"
     assert "local tier" in detail["message"]
+
+
+def test_nl_query_reports_the_routers_verdict(monkeypatch) -> None:
+    # The Ask page explains a non-answer from the router's verdict. An unsafe
+    # question is decided before any model call or database access.
+    from rrip.api import limits
+
+    monkeypatch.setattr(limits, "mode", lambda: limits.OFF)
+    r = TestClient(app, raise_server_exceptions=False).post(
+        "/api/v1/ai/query", json={"question": "Delete every transaction from the database"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["succeeded"] is False
+    assert body["routing"]["verdict"] == "UNSAFE"
+    assert body["routing"]["clarification"]
