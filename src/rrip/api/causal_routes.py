@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
+from rrip.api import limits
 from rrip.config import settings
 
 # rrip.ai.causal is NOT imported here. It pulls in statsmodels, pandas, numpy
@@ -116,11 +117,16 @@ async def _published_analysis(campaign_id: int) -> dict:
 
 
 @router.get("/analysis/{campaign_id}")
-async def analysis(campaign_id: int,
+async def analysis(campaign_id: int, request: Request,
                    adjust: bool = Query(True),
                    propose: bool = Query(False)) -> dict:
     if settings.is_published:
         return await _published_analysis(campaign_id)
+
+    # propose=true is the one path here that calls a model, so it gets the
+    # same protection as /api/v1/ai/*, checked before the panel is built.
+    if propose:
+        await limits.protect(request)
 
     from rrip.ai.causal import (
         build_panel,
@@ -165,9 +171,8 @@ async def analysis(campaign_id: int,
     proposed = []
     if propose:
         from rrip.ai.causal import propose_confounders
-        from rrip.ai.provider import get_provider
 
-        p = get_provider()
+        p = limits.guarded_provider()
         if p.available:
             proposed = await propose_confounders(
                 p, campaign_id,

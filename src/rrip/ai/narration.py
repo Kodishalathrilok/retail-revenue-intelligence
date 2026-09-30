@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-from rrip.ai.provider import LLMProvider
+from rrip.ai.provider import CallRefused, LLMProvider
 
 # Numbers a narrative can legitimately contain without them appearing in the
 # data: small ordinals and counts used to structure prose ("the top 3", "two of
@@ -197,6 +197,8 @@ async def narrate(data: Any, question: str, provider: LLMProvider) -> NarrationR
 
     try:
         resp = await provider.complete(prompt, system=SYSTEM)
+    except CallRefused:
+        raise
     except Exception as exc:
         return NarrationResult(ok=False, provider=provider.name,
                                rejected_reason=f"provider error: {exc}")

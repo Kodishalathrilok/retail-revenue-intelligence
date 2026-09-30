@@ -11,7 +11,7 @@
 
 import { useState } from 'react';
 import { CaveatBar } from '@/components/Caveats';
-import { post } from '@/lib/api';
+import { ApiError, post } from '@/lib/api';
 
 type Stage = { stage: string; passed: boolean; detail: string; duration_ms: number | null };
 type Attempt = {
@@ -55,7 +55,10 @@ export default function QueryPage() {
     try {
       setRes(await post<Result>('/api/v1/ai/query', { question: q, max_attempts: 2 }));
     } catch (e) {
-      setErr(String(e));
+      // A refusal (rate limit, daily cap, origin) carries a visitor-ready
+      // message; only an unexplained failure gets the setup hint.
+      setErr(e instanceof ApiError && e.code ? e.message
+        : `${e instanceof Error ? e.message : String(e)} — is the API running with a provider key configured?`);
     } finally {
       setBusy(false);
     }
@@ -96,7 +99,7 @@ export default function QueryPage() {
 
       {err && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {err} — is the API running with a provider key configured?
+          {err}
         </div>
       )}
 

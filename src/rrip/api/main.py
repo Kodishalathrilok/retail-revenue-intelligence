@@ -6,9 +6,11 @@ import asyncio
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from rrip.ai.provider import CallRefused
 from rrip.api import ai_routes, analytics, causal_routes, forecast_routes
 from rrip.api.db import close_pool, open_pool
 from rrip.config import settings
@@ -49,15 +51,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(CallRefused)
+async def refused(_request: Request, exc: CallRefused) -> JSONResponse:
+    """Every abuse-protection refusal, in one machine-readable shape.
+
+    `error` is a stable code the frontend can switch on; `message` is safe to
+    show a visitor as is. Nothing else is included -- no limits, no config.
+    """
+    return JSONResponse(
+        status_code=exc.status,
+        content={"error": exc.code, "message": exc.public_message,
+                 "retry_after": exc.retry_after},
+        headers={"Retry-After": str(exc.retry_after)} if exc.retry_after else None)
+
+
 app.include_router(analytics.router)
 app.include_router(ai_routes.router)
 app.include_router(causal_routes.router)
 app.include_router(forecast_routes.router)
 
 
+@app.get("/health/live")
+async def live() -> dict:
+    """Liveness: the process answers. Touches neither the database nor the
+    model provider, so neither being down makes the app look dead."""
+    return {"status": "ok"}
+
+
 @app.get("/health")
 async def health() -> dict:
-    """Health check that works on BOTH tiers.
+    """Readiness: the data store answers. Works on BOTH tiers. It never
+    consults the model provider -- the dashboards do not need it.
 
     It previously counted fact_transactions, which does not exist on the
     published tier -- so the health endpoint itself would have been the first

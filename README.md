@@ -2,11 +2,10 @@
 
 **Repository:** https://github.com/Kodishalathrilok/retail-revenue-intelligence
 
-> **Deployment status: not yet live.** The aggregate tier is built and measured
-> (14.6 MB, 120,800 rows across 23 tables) and the hosting plan is in
-> [`docs/deployment.md`](docs/deployment.md), but nothing is deployed — see
-> *What runs where* below for exactly what a hosted visitor would and would not
-> be able to do.
+> **Live:** https://retail-revenue-intelligence-flame.vercel.app — the published
+> aggregate tier (23 tables). What a hosted visitor can and cannot do is under
+> *What runs where* below; the verified deployment, its roles and its smoke-test
+> results are in [`docs/deployment.md`](docs/deployment.md).
 
 Analytics platform over the dunnhumby *Complete Journey* household panel:
 2,595,732 transactions and 36,771,279 rows of promotional exposure across 2,500
@@ -126,7 +125,7 @@ That is enforced structurally, not by prompting:
   inside it). The role is not what stops that one. The `SELECT` form *does*
   execute, as the calling role, and is refused on `pg_authid` with `42501`. So
   the bypass is real, it is a **read** bypass, and the role is what bounds its
-  reach. `rrip verify-role` runs 15 probes as `rrip_ro`; **13 of the refusals
+  reach. `rrip verify-role` runs 16 probes as `rrip_ro`; **14 of the refusals
   come from PostgreSQL itself**, and the probes use raw SQL that never touches
   the gates, so application and database rejection are never confused.
 
@@ -495,7 +494,7 @@ from one full run, never `passed + skipped` and never the collected total. Those
 numbers can differ, and two documents quoting different ones would look like a
 regression.
 
-Skips are visible on purpose — without `RRIP_RO_PASSWORD` or `RRIP_RO_DSN` the
+Skips are visible on purpose — without `RRIP_PG_READONLY_DSN` the
 read-only role probes skip rather than passing vacuously; this run had the role
 configured, so none skipped. The failure is
 `test_load_integrity.py::test_rerunning_a_dimension_insert_is_a_noop`, which
@@ -512,7 +511,8 @@ after the tables exist, then point the API at it:
 psql -U postgres -d rrip -v ro_password='<choose one>' -f sql/ddl/60_readonly_role.sql
 ```
 
-Set `RRIP_RO_PASSWORD` (or a full `RRIP_RO_DSN`) in `.env` and run
+Set `RRIP_PG_READONLY_DSN` in `.env` — the same variable the API pool connects
+with, so what is verified is what serves — and run
 `rrip verify-role`. It exits non-zero on anything other than `VERIFIED`, and a
 role that was never created reports `NOT_DEPLOYED` and fails rather than being
 skipped — a verifier that quietly passes when it cannot connect is the failure
@@ -528,6 +528,60 @@ config-switched — Groq is the alternate — and falls back across Gemini model
 because free-tier availability shifts: `gemini-2.0-flash` returns 429 quota
 exceeded on a new key and `gemini-2.5-flash` returns 404 for new users, while
 `gemini-flash-latest` works.
+
+### AI endpoint protection
+
+There are no user accounts and no login — this is a public demo, and nothing
+here is authentication. What is bounded is **cost**: how fast one client can
+spend model calls on the project's Gemini key, and how many the whole
+deployment can spend in a day.
+
+```
+AI request ──► origin check ──► per-IP rate limit ──► handler
+                                                        │
+                        each paid model attempt ──► daily global cap ──► provider
+```
+
+- **Every route that can reach a model is covered** — `/ai/query`, `/ai/ask`,
+  `/ai/narrate`, and `/causal/analysis?propose=true`. A test walks the app's
+  routes and fails if one obtains a provider without protection.
+- **Counters live in Postgres, not memory.** The API runs as serverless
+  functions; each instance has its own memory, so an in-process counter gives
+  every instance its own allowance and a fresh one on every cold start. A
+  single atomic upsert per check means concurrent requests get distinct counts —
+  tested with 40 simultaneous connections: exactly the limit pass, no increment
+  is lost.
+- **The daily cap counts paid attempts**, retries included and cache hits
+  excluded, and a refused call never reaches the provider, so concurrency cannot
+  overshoot it.
+- **The counters have their own role, `rrip_limiter`**, which can touch those
+  two tables and nothing else. `rrip_ro` stays SELECT-only — a writable table
+  behind the connection that executes model-proposed SQL would undo the
+  boundary above — and is explicitly denied the counters.
+- **The origin check is friction, not identity.** It stops another site from
+  spending the quota through its visitors' browsers; a script can send any
+  `Origin`, which is why the limit and the cap sit behind it.
+- **It fails closed.** On the published tier the AI endpoints refuse without the
+  limiter configured, and refuse while its database is unreachable — a limiter
+  an outage switches off is a limiter an outage bypasses. The dashboards never
+  touch it.
+
+Refusals are `429 RATE_LIMITED`, `429 DAILY_LLM_CAP`, `403 ORIGIN_NOT_ALLOWED`
+or `503 AI_PROTECTION_UNAVAILABLE`, as `{error, message, retry_after}` with a
+`Retry-After` header; `message` is written to be shown to a visitor and names no
+limits or configuration.
+
+| Variable | Default | |
+|---|---|---|
+| `RRIP_LIMITER_DSN` | — | DSN for `rrip_limiter`; set = on, unset locally = off |
+| `RRIP_AI_RATE_LIMIT` | 10 | AI requests per client per window |
+| `RRIP_AI_RATE_WINDOW_SECONDS` | 60 | window length |
+| `RRIP_LLM_DAILY_CAP` | 300 | model calls per UTC day, whole deployment |
+| `RRIP_TRUSTED_IP_HEADER` | — | `x-vercel-forwarded-for` behind Vercel; empty anywhere a client can forge it |
+
+```bash
+psql -U postgres -d rrip -v limiter_password='<choose one>' -f sql/ddl/70_api_limits.sql
+```
 
 ## What runs where
 

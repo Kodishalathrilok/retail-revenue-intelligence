@@ -1,7 +1,13 @@
 # Installed by Vercel for the Python function.
 #
-# Pulls the rrip package straight from the public repo. Only the CORE
+# Pulls the rrip package from the public repo AT AN EXACT COMMIT. It used to
+# track @main, so the deployed API was whatever main happened to be at build
+# time -- including, when this was found, code without the AI endpoint
+# protection the docs described. Pinning makes each deploy reproducible and
+# reviewable: bump the SHA deliberately, to a commit that passed CI.
+#
+# Only the CORE
 # dependencies come with it -- the `pipeline` extra (pandas, statsmodels,
 # scipy, dowhy) is deliberately not requested, because the published tier
 # never executes that code.
-rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@main
+rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@691f5ed33d4b9de8e1cbc399d88b8af61c6e212d

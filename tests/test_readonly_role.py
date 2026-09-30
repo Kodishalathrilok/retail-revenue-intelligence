@@ -7,15 +7,22 @@ without connecting would recreate the exact failure it is guarding against.
 
 from __future__ import annotations
 
+import os
+
 import psycopg
 import pytest
 
 from rrip.eval.verify_role import DATABASE_REFUSALS, ro_dsn, verify
 
 DSN = ro_dsn()
+
+# In the CI job that creates the role, a missing DSN must fail, not skip.
+if DSN is None and os.getenv("RRIP_REQUIRE_RO_DB"):
+    raise RuntimeError("RRIP_REQUIRE_RO_DB is set but RRIP_PG_READONLY_DSN is not")
+
 requires_role = pytest.mark.skipif(
     DSN is None,
-    reason="no read-only DSN; set RRIP_RO_PASSWORD or RRIP_RO_DSN after running "
+    reason="no read-only DSN; set RRIP_PG_READONLY_DSN after running "
            "sql/ddl/60_readonly_role.sql")
 
 
@@ -144,3 +151,68 @@ def test_role_timeout_in_ddl_matches_the_api_ceiling():
     m = re.search(r"ALTER ROLE rrip_ro SET statement_timeout = '(\d+)s'", ddl)
     assert m, "60_readonly_role.sql no longer sets a statement_timeout default"
     assert int(m.group(1)) * 1000 == MAX_TIMEOUT_MS
+
+
+# --- one DSN contract: what is verified is what serves ---------------------------
+
+@requires_role
+def test_the_api_pool_connects_as_the_verified_read_only_role():
+    """Not "the variable is set": connect with the API's own conninfo() and ask
+    the database who we are and what we may write."""
+    from rrip.api.db import conninfo
+
+    assert conninfo() == DSN
+    with psycopg.connect(conninfo()) as conn:
+        user = conn.execute("SELECT current_user").fetchone()[0]
+        writable = conn.execute(
+            "SELECT count(*) FROM information_schema.table_privileges "
+            "WHERE grantee = current_user "
+            "AND privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE')").fetchone()[0]
+        superuser = conn.execute(
+            "SELECT rolsuper FROM pg_roles WHERE rolname = current_user").fetchone()[0]
+    assert user == "rrip_ro"
+    assert writable == 0 and not superuser
+
+
+def test_published_tier_refuses_to_fall_back_to_the_owner(monkeypatch):
+    from rrip.api import db
+    from rrip.config import settings
+
+    monkeypatch.setattr(settings, "tier", "published")
+    monkeypatch.setattr(settings, "pg_readonly_dsn", "")
+    monkeypatch.setattr(settings, "retired_ro_dsn", "")
+    monkeypatch.setattr(settings, "retired_ro_password", "")
+    with pytest.raises(db.ReadOnlyRoleMisconfigured):
+        db.conninfo()
+
+
+def test_local_tier_still_falls_back_for_a_fresh_clone(monkeypatch):
+    from rrip.api import db
+    from rrip.config import settings
+
+    monkeypatch.setattr(settings, "tier", "local")
+    monkeypatch.setattr(settings, "pg_readonly_dsn", "")
+    monkeypatch.setattr(settings, "retired_ro_dsn", "")
+    monkeypatch.setattr(settings, "retired_ro_password", "")
+    monkeypatch.setattr(settings, "pg_dsn", "host=owner-fallback")
+    assert db.conninfo() == "host=owner-fallback"
+
+
+@pytest.mark.parametrize("retired", ["retired_ro_dsn", "retired_ro_password"])
+def test_retired_variable_names_fail_loudly(monkeypatch, retired):
+    from rrip.api import db
+    from rrip.config import settings
+
+    monkeypatch.setattr(settings, retired, "anything")
+    with pytest.raises(db.ReadOnlyRoleMisconfigured):
+        db.readonly_dsn()
+
+
+def test_verify_role_and_the_api_resolve_the_same_dsn(monkeypatch):
+    from rrip.api import db
+    from rrip.config import settings
+
+    monkeypatch.setattr(settings, "retired_ro_dsn", "")
+    monkeypatch.setattr(settings, "retired_ro_password", "")
+    monkeypatch.setattr(settings, "pg_readonly_dsn", "postgresql://rrip_ro@h/db")
+    assert ro_dsn() == db.conninfo() == "postgresql://rrip_ro@h/db"

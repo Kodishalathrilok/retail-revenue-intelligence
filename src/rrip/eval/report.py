@@ -423,7 +423,8 @@ def build() -> str:
         "## Not measured", "",
         "Stated rather than omitted:", "",
         "- **Published (Neon) tier.** Every figure here is the `local` tier. The "
-        "read-only role has been verified against the local database only.",
+        "read-only role table above is the local run; the production role check "
+        "and the deployment smoke test are recorded in `docs/deployment.md`.",
         "- **Cold-cache latency.** See the note in the latency section.", "",
     ]
     return "\n".join(lines)

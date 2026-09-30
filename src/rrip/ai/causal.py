@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 
-from rrip.ai.provider import LLMProvider
+from rrip.ai.provider import CallRefused, LLMProvider
 
 # Columns a proposed confounder is allowed to name. A model proposal outside
 # this set is discarded -- the schema is the authority, not the suggestion.
@@ -367,6 +367,8 @@ async def propose_confounders(provider: LLMProvider, campaign_id: int,
               f"{context}\nPropose candidate confounders.")
     try:
         resp = await provider.complete(prompt, system=CONFOUNDER_PROMPT)
+    except CallRefused:
+        raise
     except Exception:
         return []
 

@@ -212,14 +212,38 @@ def test_display_and_mailer_are_text_codes() -> None:
 # --- idempotency -----------------------------------------------------------
 
 def test_rerunning_a_dimension_insert_is_a_noop() -> None:
-    """Load-twice safety: the dimension inserts must not duplicate rows."""
-    from rrip.ingest.steps import DIM_SQL
+    """Load-twice safety: re-running the dimension insert over the same source
+    must not duplicate rows.
+
+    The insert reads stg_product, and staging is dropped when a load completes
+    (steps.drop_staging) -- so this test used to fail on every finished load
+    with "relation stg_product does not exist", never reaching the property it
+    is about. The second run is now reconstructed the way the loader performs
+    it: the real products file is staged again with the loader's own COPY, into
+    a TEMP table (which Postgres resolves ahead of public) inside a transaction
+    that is rolled back, and the real DIM_SQL runs against it.
+
+    One product that does not exist yet is staged alongside, so the assertion
+    is "exactly one row" rather than "zero": every existing product is skipped
+    AND the insert still inserts. A zero from an insert that ran over nothing
+    would otherwise pass.
+    """
+    from rrip.ingest import steps as S
+    from rrip.ingest.loader import copy_csv
+
+    files = discover(settings.raw_dir)
+    table, cols = S.COPY_SPECS["products"]
+    ddl = next(s for s in S.STAGING_DDL.split(";") if f" {table} (" in s)
     before = scalar("SELECT count(*) FROM dim_product")
     with _conn() as c, c.cursor() as cur:
-        cur.execute(DIM_SQL["dim_product"])
+        cur.execute(ddl.replace("CREATE UNLOGGED TABLE IF NOT EXISTS", "CREATE TEMP TABLE"))
+        staged = copy_csv(c, S.file_for(files, "products"), table, cols)
+        cur.execute(f"INSERT INTO {table} (product_id, department) VALUES (-424242, 'PROBE')")
+        cur.execute(S.DIM_SQL["dim_product"])
         inserted = cur.rowcount
         c.rollback()
-    assert inserted == 0
+    assert staged == count_rows(files["products"]) > 0   # the same source, restaged whole
+    assert inserted == 1                                  # only the probe row is new
     assert scalar("SELECT count(*) FROM dim_product") == before
 
 
