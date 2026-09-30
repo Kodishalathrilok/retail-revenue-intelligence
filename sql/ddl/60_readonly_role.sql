@@ -34,7 +34,8 @@
 --   local:      psql -U postgres -d rrip -v ro_password='...' -f sql/ddl/60_readonly_role.sql
 --   published:  psql "$RRIP_PUBLISH_DSN"  -v ro_password='...' -f sql/ddl/60_readonly_role.sql
 --
--- Then point the API at it via RRIP_PG_DSN (or RRIP_PG_USER/RRIP_PG_PASSWORD).
+-- Then set RRIP_PG_READONLY_DSN to a DSN for rrip_ro: the API pool connects with
+-- it, and `rrip verify-role` verifies exactly that DSN.
 -- The loader and `rrip publish` keep using the owning role -- they write.
 
 \if :{?ro_password}

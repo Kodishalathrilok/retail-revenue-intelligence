@@ -36,10 +36,18 @@ class Settings(BaseSettings):
     # model-proposed SQL from a public endpoint, where the validation gates are
     # defence in depth rather than a boundary (see sql/ddl/60_readonly_role.sql).
     #
-    # Empty means the API falls back to the credentials above and logs a warning
-    # at startup. That fallback exists so a fresh clone runs before the role is
-    # created; it is not a deployment configuration.
+    # The ONE name for this connection: the API pool and `rrip verify-role`
+    # both resolve it through rrip.api.db.readonly_dsn(), so what is verified
+    # is what serves. Empty on the local tier falls back to the credentials
+    # above with a warning, so a fresh clone runs before the role exists. Empty
+    # on the published tier is refused -- a public NL->SQL endpoint must not
+    # silently run as the owner, which is exactly what production did.
     pg_readonly_dsn: str = Field(default="", alias="RRIP_PG_READONLY_DSN")
+    # Retired names, read only so that setting one fails loudly. They used to
+    # configure verify-role alone, so verification could pass against rrip_ro
+    # while the API connected as someone else.
+    retired_ro_dsn: str = Field(default="", alias="RRIP_RO_DSN")
+    retired_ro_password: str = Field(default="", alias="RRIP_RO_PASSWORD")
 
     # Calendar anchor for dim_date. dunnhumby publishes no start date, only
     # DAY 1..711. This must be a WEDNESDAY so that day 6 falls on a Monday and
@@ -112,7 +120,7 @@ class Settings(BaseSettings):
                                         alias="RRIP_AI_RATE_WINDOW_SECONDS")
     llm_daily_cap: int = Field(default=300, ge=0, alias="RRIP_LLM_DAILY_CAP")
     # Header carrying the client IP, trusted ONLY when set. Behind Vercel use
-    # x-real-ip, which the platform sets itself; anywhere a client can reach the
+    # x-vercel-forwarded-for, which the platform sets itself; anywhere a client can reach the
     # API directly, leave empty so a forged header cannot pick its own bucket.
     trusted_ip_header: str = Field(default="", alias="RRIP_TRUSTED_IP_HEADER")
 

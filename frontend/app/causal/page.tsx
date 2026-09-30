@@ -103,7 +103,9 @@ function AnalysisPanel({ a }: { a: Analysis }) {
         <div className="flex items-center gap-2">
           <span className={`rounded px-2 py-0.5 text-xs font-semibold text-white ${
             a.parallel_trends.passed ? 'bg-emerald-600' : 'bg-red-600'}`}>
-            PARALLEL TRENDS {a.parallel_trends.passed ? 'HOLD' : 'VIOLATED'}
+            {/* "Not rejected", never "hold": a pass on this low-power test is
+                absence of evidence of a pre-trend, as the verdict below says. */}
+            PARALLEL TRENDS {a.parallel_trends.passed ? 'NOT REJECTED' : 'VIOLATED'}
           </span>
           <span className="text-xs text-slate-600">
             interaction p = {a.parallel_trends.interaction_pvalue.toFixed(4)} ·{' '}

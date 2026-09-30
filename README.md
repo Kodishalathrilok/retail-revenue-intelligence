@@ -2,11 +2,10 @@
 
 **Repository:** https://github.com/Kodishalathrilok/retail-revenue-intelligence
 
-> **Deployment status: not yet live.** The aggregate tier is built and measured
-> (14.6 MB, 120,800 rows across 23 tables) and the hosting plan is in
-> [`docs/deployment.md`](docs/deployment.md), but nothing is deployed — see
-> *What runs where* below for exactly what a hosted visitor would and would not
-> be able to do.
+> **Live:** https://retail-revenue-intelligence-flame.vercel.app — the published
+> aggregate tier (23 tables). What a hosted visitor can and cannot do is under
+> *What runs where* below; the verified deployment, its roles and its smoke-test
+> results are in [`docs/deployment.md`](docs/deployment.md).
 
 Analytics platform over the dunnhumby *Complete Journey* household panel:
 2,595,732 transactions and 36,771,279 rows of promotional exposure across 2,500
@@ -126,7 +125,7 @@ That is enforced structurally, not by prompting:
   inside it). The role is not what stops that one. The `SELECT` form *does*
   execute, as the calling role, and is refused on `pg_authid` with `42501`. So
   the bypass is real, it is a **read** bypass, and the role is what bounds its
-  reach. `rrip verify-role` runs 15 probes as `rrip_ro`; **13 of the refusals
+  reach. `rrip verify-role` runs 16 probes as `rrip_ro`; **14 of the refusals
   come from PostgreSQL itself**, and the probes use raw SQL that never touches
   the gates, so application and database rejection are never confused.
 
@@ -495,7 +494,7 @@ from one full run, never `passed + skipped` and never the collected total. Those
 numbers can differ, and two documents quoting different ones would look like a
 regression.
 
-Skips are visible on purpose — without `RRIP_RO_PASSWORD` or `RRIP_RO_DSN` the
+Skips are visible on purpose — without `RRIP_PG_READONLY_DSN` the
 read-only role probes skip rather than passing vacuously; this run had the role
 configured, so none skipped. The failure is
 `test_load_integrity.py::test_rerunning_a_dimension_insert_is_a_noop`, which
@@ -512,7 +511,8 @@ after the tables exist, then point the API at it:
 psql -U postgres -d rrip -v ro_password='<choose one>' -f sql/ddl/60_readonly_role.sql
 ```
 
-Set `RRIP_RO_PASSWORD` (or a full `RRIP_RO_DSN`) in `.env` and run
+Set `RRIP_PG_READONLY_DSN` in `.env` — the same variable the API pool connects
+with, so what is verified is what serves — and run
 `rrip verify-role`. It exits non-zero on anything other than `VERIFIED`, and a
 role that was never created reports `NOT_DEPLOYED` and fails rather than being
 skipped — a verifier that quietly passes when it cannot connect is the failure
@@ -577,7 +577,7 @@ limits or configuration.
 | `RRIP_AI_RATE_LIMIT` | 10 | AI requests per client per window |
 | `RRIP_AI_RATE_WINDOW_SECONDS` | 60 | window length |
 | `RRIP_LLM_DAILY_CAP` | 300 | model calls per UTC day, whole deployment |
-| `RRIP_TRUSTED_IP_HEADER` | — | `x-real-ip` behind Vercel; empty anywhere a client can forge it |
+| `RRIP_TRUSTED_IP_HEADER` | — | `x-vercel-forwarded-for` behind Vercel; empty anywhere a client can forge it |
 
 ```bash
 psql -U postgres -d rrip -v limiter_password='<choose one>' -f sql/ddl/70_api_limits.sql

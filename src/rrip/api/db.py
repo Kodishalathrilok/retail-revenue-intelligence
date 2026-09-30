@@ -25,6 +25,23 @@ MAX_TIMEOUT_MS = 120_000
 _pool: AsyncConnectionPool | None = None
 
 
+class ReadOnlyRoleMisconfigured(RuntimeError):
+    pass
+
+
+def readonly_dsn() -> str:
+    """The read-only DSN: the one the pool uses AND the one verify-role checks.
+
+    Both call this, so a passing verification is a statement about the
+    connection that actually serves requests.
+    """
+    if settings.retired_ro_dsn or settings.retired_ro_password:
+        raise ReadOnlyRoleMisconfigured(
+            "RRIP_RO_DSN / RRIP_RO_PASSWORD are retired. Set RRIP_PG_READONLY_DSN "
+            "-- the same variable the API uses -- and remove the old names.")
+    return settings.pg_readonly_dsn
+
+
 def conninfo() -> str:
     """Connection string for the API pool, preferring the read-only role.
 
@@ -40,8 +57,13 @@ def conninfo() -> str:
     connection without sslmode -- which surfaces as a pool timeout rather than
     an SSL error.
     """
-    if settings.pg_readonly_dsn:
-        return settings.pg_readonly_dsn
+    ro = readonly_dsn()
+    if ro:
+        return ro
+    if settings.is_published:
+        raise ReadOnlyRoleMisconfigured(
+            "RRIP_TIER=published requires RRIP_PG_READONLY_DSN. Refusing to serve "
+            "the public NL->SQL endpoint with the owning role's credentials.")
 
     logger.warning(
         "RRIP_PG_READONLY_DSN is not set -- the API is connecting with the "
