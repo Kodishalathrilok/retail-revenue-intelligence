@@ -31,6 +31,35 @@
   --color-accent-ink: oklch(99%   0.004 210);  /* text on an accent fill   */
   --color-focus:      oklch(52%   0.150 210);  /* keyboard ring only       */
 
+  /* ---- status -------------------------------------------------------- */
+  /* Semantic, not decorative: positive / caution / negative / neutral carry
+     meaning (accepted, limited confidence, violated). Each is a triple so a
+     badge, a callout border and its text come from one family. Status is
+     always also stated in text -- colour alone is never the only signal.
+     fg on bg clears 7:1; hues sit away from the 210 accent. */
+  --color-positive:      oklch(40%   0.090 155);
+  --color-positive-bg:   oklch(96.5% 0.022 155);
+  --color-positive-rule: oklch(84%   0.050 155);
+  --color-caution:       oklch(42%   0.085  70);
+  --color-caution-bg:    oklch(96.5% 0.030  85);
+  --color-caution-rule:  oklch(85%   0.060  80);
+  --color-negative:      oklch(43%   0.130  25);
+  --color-negative-bg:   oklch(96.5% 0.020  25);
+  --color-negative-rule: oklch(85%   0.050  25);
+
+  /* ---- charts -------------------------------------------------------- */
+  /* Recharts takes colours as attributes; var() resolves in SVG presentation
+     attributes, so charts read these directly (components/charts/theme.ts).
+     ink = observed, accent = model/forecast, band = interval, context =
+     secondary series, compare = the second arm of a comparison. */
+  --chart-ink:      var(--color-ink);
+  --chart-model:    var(--color-accent);
+  --chart-band:     oklch(42% 0.105 210 / 0.16);
+  --chart-context:  oklch(66% 0.020 250);
+  --chart-compare:  oklch(52% 0.120  40);
+  --chart-grid:     var(--color-rule);
+  --chart-axis:     var(--color-muted);
+
   /* ---- type ---------------------------------------------------------- */
   /* --font-display / --font-body / --font-mono are injected by next/font
      in app/layout.tsx; these are the fallback stacks behind them. */

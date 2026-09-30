@@ -28,6 +28,7 @@ import {
   Area, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
+import { ErrorState } from '@/components/ui';
 import { fmtMoney, fmtNum, get } from '@/lib/api';
 
 type DeptItem = {
@@ -106,8 +107,9 @@ export default function ForecastPage() {
   const [selected, setSelected] = useState<string>('GROCERY');
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     Promise.all([
@@ -115,8 +117,8 @@ export default function ForecastPage() {
       get<{ items: DeptItem[] }>('/api/v1/forecast/departments'),
     ])
       .then(([s, d]) => { setSummary(s); setDepartments(d.items); })
-      .catch((e) => setError(String(e)));
-  }, []);
+      .catch(setError);
+  }, [attempt]);
 
   useEffect(() => {
     if (!selected) return;
@@ -128,9 +130,9 @@ export default function ForecastPage() {
         `/api/v1/forecast/history/${encodeURIComponent(selected)}?weeks=30`),
     ])
       .then(([f, h]) => { setForecast(f); setHistory(h.series); })
-      .catch((e) => { setForecast(null); setError(String(e)); })
+      .catch((e) => { setForecast(null); setError(e); })
       .finally(() => setLoading(false));
-  }, [selected]);
+  }, [selected, attempt]);
 
   const chart = history.map((p) => ({
     week: p.week_no,
@@ -195,10 +197,9 @@ export default function ForecastPage() {
         {loading && <span className="text-xs text-slate-400">loading…</span>}
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900">
-          {error}
-        </div>
+      {error != null && (
+        <ErrorState error={error} what="the forecast"
+                    onRetry={() => setAttempt((n) => n + 1)} />
       )}
 
       {forecast && (
