@@ -6,6 +6,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { CaveatBar } from '@/components/Caveats';
+import { ErrorState } from '@/components/ui';
 import { fmtMoney, fmtNum, get } from '@/lib/api';
 
 type Overview = {
@@ -33,16 +34,22 @@ export default function OverviewPage() {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
   const [dept, setDept] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  // These two used to fail silently (.catch(() => {})): the drill-down or the
+  // segment chart simply vanished with no explanation.
+  const [deptError, setDeptError] = useState<unknown>(null);
+  const [segError, setSegError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     get<{ items: { department: string }[] }>('/api/v1/departments')
-      .then((d) => setDepartments(d.items.map((x) => x.department)))
-      .catch(() => {});
+      .then((d) => { setDepartments(d.items.map((x) => x.department)); setDeptError(null); })
+      .catch(setDeptError);
     get<{ items: Segment[] }>('/api/v1/segments/rfm')
-      .then((d) => setSegments(d.items)).catch(() => {});
-  }, []);
+      .then((d) => { setSegments(d.items); setSegError(null); })
+      .catch(setSegError);
+  }, [attempt]);
 
   // Drill-down: department filter re-queries the server rather than filtering
   // client-side, so the numbers are always computed by SQL.
@@ -54,9 +61,11 @@ export default function OverviewPage() {
       get<{ items: Weekly[] }>(`/api/v1/revenue/weekly${q}`),
     ])
       .then(([o, w]) => { setOv(o); setWeekly(w.items); setError(null); })
-      .catch((e) => setError(String(e)))
+      .catch(setError)
       .finally(() => setLoading(false));
-  }, [dept]);
+  }, [dept, attempt]);
+
+  const retry = () => setAttempt((n) => n + 1);
 
   return (
     <div className="space-y-6">
@@ -80,10 +89,9 @@ export default function OverviewPage() {
         </label>
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error} — is the API running? <code>rrip serve</code>
-        </div>
+      {error != null && <ErrorState error={error} what="the overview" onRetry={retry} />}
+      {deptError != null && (
+        <ErrorState error={deptError} what="the department list" onRetry={retry} />
       )}
 
       {ov && (
@@ -160,6 +168,10 @@ export default function OverviewPage() {
             ))}
           </div>
         </section>
+      )}
+
+      {segError != null && (
+        <ErrorState error={segError} what="the RFM segments" onRetry={retry} />
       )}
 
       <CaveatBar calendar panel revenue />

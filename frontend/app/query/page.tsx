@@ -11,6 +11,7 @@
 
 import { useState } from 'react';
 import { CaveatBar } from '@/components/Caveats';
+import { Callout, ErrorState } from '@/components/ui';
 import { ApiError, post } from '@/lib/api';
 
 type Stage = { stage: string; passed: boolean; detail: string; duration_ms: number | null };
@@ -48,17 +49,14 @@ export default function QueryPage() {
   const [q, setQ] = useState(EXAMPLES[0]);
   const [res, setRes] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<unknown>(null);
 
   async function run() {
     setBusy(true); setErr(null); setRes(null);
     try {
       setRes(await post<Result>('/api/v1/ai/query', { question: q, max_attempts: 2 }));
     } catch (e) {
-      // A refusal (rate limit, daily cap, origin) carries a visitor-ready
-      // message; only an unexplained failure gets the setup hint.
-      setErr(e instanceof ApiError && e.code ? e.message
-        : `${e instanceof Error ? e.message : String(e)} — is the API running with a provider key configured?`);
+      setErr(e);
     } finally {
       setBusy(false);
     }
@@ -97,11 +95,15 @@ export default function QueryPage() {
         </p>
       </div>
 
-      {err && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {err}
-        </div>
-      )}
+      {/* A refusal (rate limit, daily cap, AI unavailable) is expected product
+          behaviour with a visitor-ready message, so it reads as a notice; only
+          an unexplained failure is an error. The developer hint that used to be
+          appended here ("is the API running…") is gone from the public site. */}
+      {err instanceof ApiError && err.code ? (
+        <Callout tone="caution" title="Not answered">{err.message}</Callout>
+      ) : err != null ? (
+        <ErrorState error={err} what="an answer" onRetry={run} />
+      ) : null}
 
       {res && (
         <>

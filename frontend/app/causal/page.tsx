@@ -16,6 +16,7 @@ import {
   CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { CaveatBar } from '@/components/Caveats';
+import { ErrorState } from '@/components/ui';
 import { fmtNum, get } from '@/lib/api';
 
 type Analysis = {
@@ -152,12 +153,20 @@ function AnalysisPanel({ a }: { a: Analysis }) {
 export default function CausalPage() {
   const [clean, setClean] = useState<Analysis | null>(null);
   const [stress, setStress] = useState<Analysis | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<unknown>(null);
+  // Campaign 18 used to fail silently (.catch(() => {})), so the contaminated
+  // comparison could disappear without a word.
+  const [stressErr, setStressErr] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    get<Analysis>('/api/v1/causal/analysis/26').then(setClean).catch((e) => setErr(String(e)));
-    get<Analysis>('/api/v1/causal/analysis/18').then(setStress).catch(() => {});
-  }, []);
+    get<Analysis>('/api/v1/causal/analysis/26')
+      .then((a) => { setClean(a); setErr(null); }).catch(setErr);
+    get<Analysis>('/api/v1/causal/analysis/18')
+      .then((a) => { setStress(a); setStressErr(null); }).catch(setStressErr);
+  }, [attempt]);
+
+  const retry = () => setAttempt((n) => n + 1);
 
   return (
     <div className="space-y-8">
@@ -170,13 +179,9 @@ export default function CausalPage() {
         </p>
       </div>
 
-      {err && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {err} — is the API running? <code>rrip serve</code>
-        </div>
-      )}
+      {err != null && <ErrorState error={err} what="campaign 26" onRetry={retry} />}
 
-      {clean ? <AnalysisPanel a={clean} /> : !err && (
+      {clean ? <AnalysisPanel a={clean} /> : err == null && (
         <div className="py-16 text-center text-sm text-slate-400">Computing…</div>
       )}
 
@@ -194,6 +199,11 @@ export default function CausalPage() {
           </div>
           <AnalysisPanel a={stress} />
         </div>
+      )}
+
+      {stressErr != null && (
+        <ErrorState error={stressErr} what="the contaminated comparison (campaign 18)"
+                    onRetry={retry} />
       )}
 
       <CaveatBar calendar panel revenue />
