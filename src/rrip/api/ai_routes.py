@@ -118,6 +118,7 @@ async def nl_query(req: NLQueryRequest, provider: str | None = None) -> NLQueryR
         total_duration_ms=result.total_duration_ms,
         provider=result.provider,
         failure_reason=_public_reason(result.failure_reason),
+        routing=result.routing,
     )
 
 

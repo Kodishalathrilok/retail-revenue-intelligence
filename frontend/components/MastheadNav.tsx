@@ -19,7 +19,7 @@ import { usePathname } from 'next/navigation';
 
 const NAV = [
   { href: '/', label: 'Overview' },
-  { href: '/query', label: 'NL Query' },
+  { href: '/query', label: 'Ask' },
   { href: '/forecast', label: 'Forecast' },
   { href: '/causal', label: 'Causal' },
 ];

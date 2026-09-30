@@ -145,3 +145,8 @@ class NLQueryResponse(BaseModel):
     total_duration_ms: float = 0.0
     provider: str | None = None
     failure_reason: str | None = None
+    # The answerability router's decision (verdict, reason, clarification, ...),
+    # already computed by nl2sql.answer and previously dropped here. It lets a
+    # client say WHY a question was not answered -- read-only, not in this
+    # dataset, ambiguous, a forecast question -- instead of parsing prose.
+    routing: dict | None = None
