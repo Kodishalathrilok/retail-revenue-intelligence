@@ -133,11 +133,13 @@ jobs:
       - name: The API's own DSN is the read-only role, and the role holds
         # Resolved exactly as the API pool resolves it (RRIP_PG_READONLY_DSN).
         # RRIP_REQUIRE_RO_DB makes a missing DSN a failure rather than a skip.
+        # test_db_pool: the same pool must survive the server dropping its
+        # idle connections.
         env:
           RRIP_PG_READONLY_DSN: postgresql://rrip_ro:ci-readonly@localhost:5432/rrip
           RRIP_REQUIRE_RO_DB: "1"
         run: |
-          pytest -q tests/test_readonly_role.py
+          pytest -q tests/test_readonly_role.py tests/test_db_pool.py
           python -m rrip.cli verify-role
 
       - name: Quality check definitions are well-formed
