@@ -10,4 +10,4 @@
 # dependencies come with it -- the `pipeline` extra (pandas, statsmodels,
 # scipy, dowhy) is deliberately not requested, because the published tier
 # never executes that code.
-rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@908c93f1b5c6a12afeb60e69ac6875e86b30c374
+rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@0be470f6a1438a348c58ef64edda7460c0059b61
