@@ -172,3 +172,58 @@ def test_rate_limit_refusal(monkeypatch) -> None:
     monkeypatch.setattr(limits, "hit_ip", over)
     r = _ask()
     assert r.status_code == 429 and r.json()["error"] == "RATE_LIMITED"
+
+
+# --- the published tier: forecasts come from pub_forecast*, never the file store --
+# Found by `rrip smoke` against production: /ask read the on-disk model
+# artifact, which the Vercel function does not have, so every forecast question
+# returned 503 there while GET /api/v1/forecast (tier-aware) worked.
+
+def test_published_ask_never_touches_the_file_store(monkeypatch) -> None:
+    from rrip.api import ai_routes, forecast_routes
+
+    monkeypatch.setattr(settings, "tier", "published")
+
+    def no_files(*a, **k):
+        raise AssertionError("the published tier has no model artifact on disk")
+
+    async def pub_departments():
+        return DEPARTMENTS
+
+    async def pub_forecast(department, week, horizon):
+        return {"department": department, "source": "pub_forecast"}
+
+    monkeypatch.setattr(FS, "load_store", no_files)
+    monkeypatch.setattr(FS, "forecast", no_files)
+    monkeypatch.setattr(ai_routes, "_published_forecast_departments", pub_departments)
+    monkeypatch.setattr(forecast_routes, "_published_forecast", pub_forecast)
+    # Protection is tested elsewhere; a published tier without a limiter
+    # refuses by design, which is not what this test is about.
+    monkeypatch.setattr(limits, "mode", lambda: limits.OFF)
+
+    r = _ask(DETERMINISTIC)
+    assert r.status_code == 200, r.text
+    assert r.json()["forecast"] == {"department": "GROCERY", "source": "pub_forecast"}
+
+
+def test_published_ask_against_the_real_pub_tables(monkeypatch) -> None:
+    """End to end on the published tables in the local database, through the
+    API's own read-only connection."""
+    from rrip.api.db import readonly_dsn
+
+    if not readonly_dsn():
+        pytest.skip("no RRIP_PG_READONLY_DSN")
+    monkeypatch.setattr(settings, "tier", "published")
+    monkeypatch.setattr(limits, "mode", lambda: limits.OFF)
+
+    def no_files(*a, **k):
+        raise AssertionError("the published tier has no model artifact on disk")
+
+    monkeypatch.setattr(FS, "load_store", no_files)
+    monkeypatch.setattr(FS, "forecast", no_files)
+    with TestClient(app) as c:                       # lifespan opens the pool
+        r = c.post("/api/v1/ai/ask", json={"question": DETERMINISTIC})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["succeeded"] is True
+    assert body["forecast"]["department"] == "GROCERY"
