@@ -224,6 +224,18 @@ async def analysis(campaign_id: int, request: Request,
 @router.get("/validation")
 async def validation() -> dict:
     """Recovery accuracy against synthetic data with a known true effect."""
+    if settings.is_published:
+        # The suite re-runs simulations with statsmodels, which the published
+        # tier deliberately does not install (see the note at the top of this
+        # module). Importing it here was a 500 in production; say what is true
+        # instead -- the validation is a local measurement, and its recorded
+        # results are in reports/eval/latest.md.
+        raise HTTPException(503, {
+            "error": "LOCAL_ONLY",
+            "message": ("Estimator validation re-runs simulations and is available "
+                        "on the local tier only. Its recorded results are in the "
+                        "project's evaluation report."),
+        })
     from rrip.ai.causal_validate import run_suite
     results = await asyncio.to_thread(run_suite)
     return {"items": [{
