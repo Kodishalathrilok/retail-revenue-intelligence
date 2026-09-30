@@ -38,3 +38,14 @@ def test_a_failure_still_says_violated() -> None:
     pt = check_parallel_trends(_panel(treated_slope=4.0))
     assert not pt.passed
     assert "VIOLATED" in pt.verdict
+
+
+def test_the_causal_page_badge_does_not_overclaim() -> None:
+    # The verdict text was corrected, but the page's badge still read
+    # "PARALLEL TRENDS HOLD" directly above it.
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parents[1] / "frontend/app/causal/page.tsx").read_text(
+        encoding="utf-8")
+    assert "'HOLD'" not in page
+    assert "NOT REJECTED" in page
