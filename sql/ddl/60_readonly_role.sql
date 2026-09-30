@@ -56,6 +56,17 @@ $$;
 
 ALTER ROLE rrip_ro PASSWORD :'ro_password';
 
+-- A statement_timeout DEFAULT for every session this role opens. Defence in
+-- depth, and deliberately not described as the boundary: statement_timeout is
+-- a user-settable parameter, so any session can override its role default with
+-- SET or set_config(). The API does exactly that on every checkout (acquire()
+-- in src/rrip/api/db.py). What stops generated SQL from raising its own limit
+-- is the application gates -- a single SELECT only, set_config forbidden --
+-- plus the EXPLAIN cost ceiling. This default covers the sessions that never
+-- go through the API: psql, a notebook, a future code path that forgets.
+-- The value is MAX_TIMEOUT_MS in src/rrip/api/db.py; a test keeps them equal.
+ALTER ROLE rrip_ro SET statement_timeout = '120s';
+
 -- Connect and look, nothing more. GRANT takes a database identifier, not an
 -- expression, so the name is interpolated rather than passed as a function.
 DO $$

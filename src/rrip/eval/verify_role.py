@@ -42,9 +42,13 @@ from datetime import UTC, datetime
 
 import psycopg
 
+from rrip.api.db import MAX_TIMEOUT_MS
 from rrip.config import PROJECT_ROOT, settings
 
 ROLE = "rrip_ro"
+
+# The role's statement_timeout default mirrors the API's own ceiling.
+EXPECTED_STATEMENT_TIMEOUT_MS = MAX_TIMEOUT_MS
 
 # Each probe is (id, description, sql, why_it_matters).
 #
@@ -215,6 +219,11 @@ def verify(dsn: str) -> dict:
             cur.execute(
                 "SELECT has_schema_privilege(current_user, 'public', 'CREATE')")
             can_create = cur.fetchone()[0]
+            # A fresh session carries the role default and nothing else, so
+            # this reads what sql/ddl/60_readonly_role.sql set.
+            cur.execute("SELECT setting::bigint FROM pg_settings "
+                        "WHERE name = 'statement_timeout'")
+            timeout_ms = int(cur.fetchone()[0])
         conn.rollback()
 
         for pid, desc, sql in WRITE_PROBES:
@@ -228,11 +237,13 @@ def verify(dsn: str) -> dict:
                     if p.expected == "denied" and p.refused_by == "error"]
     reads_ok = all(p.passed for p in probes if p.expected == "allowed")
 
+    timeout_ok = timeout_ms == EXPECTED_STATEMENT_TIMEOUT_MS
+
     if breaches:
         status = "BREACH"
     elif not reads_ok:
         status = "MISCONFIGURED"      # denies writes but cannot read either
-    elif inconclusive:
+    elif inconclusive or not timeout_ok:
         status = "PARTIAL"
     else:
         status = "VERIFIED"
@@ -248,6 +259,13 @@ def verify(dsn: str) -> dict:
             "rolsuper": attrs[0], "rolcreatedb": attrs[1],
             "rolcreaterole": attrs[2], "rolinherit": attrs[3],
             "can_create_in_public": can_create,
+        },
+        # Reported beside the probes, not as one: it is a default the session
+        # can override, so it bounds nothing an attacker controls.
+        "statement_timeout_default": {
+            "observed_ms": timeout_ms,
+            "expected_ms": EXPECTED_STATEMENT_TIMEOUT_MS,
+            "ok": timeout_ok,
         },
         "n_probes": len(probes),
         "n_passed": sum(p.passed for p in probes),

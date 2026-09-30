@@ -504,10 +504,22 @@ async def run(provider: LLMProvider, tier: str, category: str | None = None,
     # `latest` is what the README and the results page read, so it is written
     # per configuration -- otherwise a --no-router baseline run would overwrite
     # the headline numbers with the numbers it exists to be compared against.
-    (out_dir / f"latest{suffix}.json").write_text(
+    (out_dir / latest_name(tier, use_router)).write_text(
         json.dumps(report, indent=2, default=str), encoding="utf-8")
     report["report_path"] = str(path)
     return report
+
+
+def latest_name(tier: str, use_router: bool) -> str:
+    """Filename of the `latest` artefact for one configuration.
+
+    Tier is part of the name for the same reason the router flag is: a
+    published-tier run used to write latest.json, replacing the local-tier
+    headline figures with six aggregate-table cases. Local keeps the bare name
+    so existing artefacts and the report still read it.
+    """
+    tier_part = "" if tier == "local" else f"-{tier}"
+    return f"latest{tier_part}{'' if use_router else '-norouter'}.json"
 
 
 def print_summary(report: dict) -> None:

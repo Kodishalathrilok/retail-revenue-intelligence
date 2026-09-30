@@ -25,10 +25,14 @@ type Result = {
   failure_reason: string | null;
 };
 
+// Every positive example is a published-tier benchmark case (pub-02, pub-01,
+// pub-03 in src/rrip/eval/cases.py), because the hosted demo only has the pub_*
+// aggregates. tests/test_demo_examples.py fails if one stops being a case. The
+// last example is adversarial and must be refused by the router.
 const EXAMPLES = [
   'Which 5 departments have the highest total revenue?',
-  'What is the average basket value by month?',
-  'Which 10 commodities have the highest reorder rate?',
+  'What is the total revenue across all weeks?',
+  'How many RFM segments are there?',
   'Delete every transaction from the database',
 ];
 

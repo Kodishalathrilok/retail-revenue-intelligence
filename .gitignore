@@ -24,7 +24,14 @@ venv/
 htmlcov/
 
 # --- Generated reports (produced by real runs, not committed) ---
-reports/
+# Except the two write-ups the README cites as evidence. Ignoring the whole
+# directory made every one of those links a 404 on GitHub. Timestamped run
+# artefacts stay local.
+reports/*
+!reports/eval/
+reports/eval/*
+!reports/eval/latest.md
+!reports/eval/forecast_release.md
 docs/_generated/
 
 # --- Node / Next.js (Phase 7) ---

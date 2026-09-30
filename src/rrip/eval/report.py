@@ -43,6 +43,51 @@ def _fmt(value, suffix: str = "", missing: str = NOT_MEASURED) -> str:
     return f"{value:,}{suffix}" if isinstance(value, int) else f"{value}{suffix}"
 
 
+# Summary keys as the runner wrote them before the rename documented in
+# rrip.eval.runner ("execution accuracy" and "executable rate" were the previous
+# names). The recorded runs predate the rename, and reading only the new keys
+# printed NOT MEASURED over figures that were measured -- the per-case records
+# in those files reproduce every one of them exactly.
+_LEGACY_KEYS = {
+    "result_equivalence_pct": "execution_accuracy",
+    "final_execution_success_pct": "executable_rate",
+    "first_attempt_execution_success_pct": "first_attempt_success",
+    "retry_recovery_cases": "recovered_by_retry",
+}
+
+
+def _metric(summary: dict | None, key: str):
+    if not summary:
+        return None
+    value = summary.get(key)
+    return summary.get(_LEGACY_KEYS[key]) if value is None and key in _LEGACY_KEYS else value
+
+
+def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson score interval for k successes in n trials, as proportions.
+
+    Chosen over the normal approximation because it stays inside [0, 1] and
+    keeps honest width near 100%, which is where this benchmark sits.
+    """
+    if n <= 0:
+        raise ValueError("n must be positive")
+    p = k / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / denom
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def _equivalence_interval(run: dict, label: str) -> str:
+    graded = [c for c in run["cases"] if c["expectation"] == "correct"]
+    if not graded:
+        return f"| {label} | {NOT_MEASURED} |"
+    k, n = sum(c["passed"] for c in graded), len(graded)
+    lo, hi = wilson(k, n)
+    return (f"| {label} | {k}/{n} = **{100 * k / n:.1f}%**, "
+            f"95% Wilson CI {100 * lo:.1f}–{100 * hi:.1f}% |")
+
+
 def _nl2sql_section(router: dict | None, baseline: dict | None) -> list[str]:
     if not router:
         return ["## NL to SQL", "",
@@ -54,8 +99,8 @@ def _nl2sql_section(router: dict | None, baseline: dict | None) -> list[str]:
     rt = s["router"]
 
     def cmp(key: str, suffix: str = "%") -> str:
-        now = _fmt(s.get(key), suffix)
-        was = _fmt(b.get(key), suffix) if b else NOT_MEASURED
+        now = _fmt(_metric(s, key), suffix)
+        was = _fmt(_metric(b, key), suffix) if b else NOT_MEASURED
         return f"| {key.replace('_', ' ')} | {was} | {now} |"
 
     out = [
@@ -71,13 +116,20 @@ def _nl2sql_section(router: dict | None, baseline: dict | None) -> list[str]:
         cmp("refusal_rate"),
         cmp("ambiguous_handled_rate"),
         f"| retry recovery | "
-        f"{_fmt(b.get('retry_recovery_cases') if b else None, ' cases')} "
-        f"| {_fmt(s.get('retry_recovery_cases'), ' cases')} |",
+        f"{_fmt(_metric(b, 'retry_recovery_cases'), ' cases')} "
+        f"| {_fmt(_metric(s, 'retry_recovery_cases'), ' cases')} |",
         "",
         "**`result_equivalence_pct` is the correctness measure.** It is computed "
         f"over the {s.get('n_graded', '?')} cases carrying a reference query: both queries "
         "execute and their result sets are compared, so a differently-phrased "
         "query returning the right answer counts as correct.",
+        "",
+        "With its uncertainty — the sample is small, and a bare percentage hides "
+        "how wide the plausible range is:",
+        "",
+        "| run | result equivalence |", "|---|---|",
+        *([_equivalence_interval(baseline, "router off")] if baseline else []),
+        _equivalence_interval(router, "router on"),
         "",
         "**The two `execution_success` rows are not correctness.** They say only "
         "that SQL ran. They fall when the router is on, and that is the router "
@@ -288,6 +340,15 @@ def _role_section(role: dict | None) -> list[str]:
         out += [f"| {p['description']} | {p['expected']} | {p['outcome']} "
                 f"| {p['refused_by']} |" for p in role["probes"]]
         out += [""]
+    td = role.get("statement_timeout_default")
+    if td:
+        out += [
+            f"Role `statement_timeout` default: {td['observed_ms']:,} ms "
+            f"(expected {td['expected_ms']:,} ms, "
+            f"{'ok' if td['ok'] else '**MISMATCH**'}). A default, not a boundary: "
+            "any session can override it with `SET`, and the API does. What stops "
+            "generated SQL from changing it is the application gates (single "
+            "`SELECT`, `set_config` forbidden).", ""]
     return out
 
 

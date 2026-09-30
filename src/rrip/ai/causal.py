@@ -245,8 +245,12 @@ def check_parallel_trends(df: pd.DataFrame, alpha: float = 0.05) -> ParallelTren
         weekly.loc[weekly.treated == 0, "spend"], 1)[0])
 
     passed = bool(pval > alpha)
-    verdict = ("Pre-period trends are statistically indistinguishable "
-               f"(interaction p = {pval:.3f}). Parallel trends is supported."
+    # "Not rejected", never "holds": a single linear interaction on weekly
+    # group means has little power, so a pass is absence of evidence of a
+    # pre-trend, not evidence of parallel trends.
+    verdict = ("The pre-period test did not reject parallel trends "
+               f"(interaction p = {pval:.3f}). This is a low-power linear test, "
+               "so it is consistent with parallel trends but does not prove them."
                if passed else
                f"Pre-period trends DIVERGE (interaction p = {pval:.4f}). "
                "Parallel trends is VIOLATED and the DiD estimate is not "
