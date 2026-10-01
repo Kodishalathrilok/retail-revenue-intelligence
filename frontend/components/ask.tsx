@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { AXIS_TICK, CHART, GRID_PROPS, TOOLTIP_STYLE } from '@/components/chart-theme';
 import { RevenueCaveat } from '@/components/Caveats';
-import { Disclosure } from '@/components/ui';
+import { Disclosure, FactRow as Row } from '@/components/ui';
 import { formatValue, humanize } from '@/lib/answer.mjs';
 
 export type Stage = { stage: string; passed: boolean; detail: string; duration_ms: number | null };
@@ -215,15 +215,6 @@ export function ValidationTrail({ attempts }: { attempts: Attempt[] }) {
           )}
         </div>
       ))}
-    </div>
-  );
-}
-
-function Row({ term, children }: { term: string; children: React.ReactNode }) {
-  return (
-    <div className="grid gap-1 border-b border-rule py-3 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-4">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-muted">{term}</dt>
-      <dd className="min-w-0 text-sm text-ink-2">{children}</dd>
     </div>
   );
 }

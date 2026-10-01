@@ -6,8 +6,10 @@ import type { Config } from 'tailwindcss';
  * app/tokens.css, so the token block stays the single source of truth and a
  * class like `text-muted` cannot drift from `var(--color-muted)`.
  *
- * The existing Tailwind slate palette is left in place: the four page files
- * are painted in it, and remapping it here would repaint them silently.
+ * Tailwind's stock palette is still available, but no page or component uses
+ * it: everything is painted from these tokens, and
+ * tests/test_overview_product.py fails on a raw slate/emerald/amber/red class
+ * or a hex colour.
  */
 export default {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],

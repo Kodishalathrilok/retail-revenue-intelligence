@@ -1,180 +1,274 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import {
-  Bar, BarChart, CartesianGrid, Legend, Line, LineChart,
-  ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from 'recharts';
-import { CaveatBar } from '@/components/Caveats';
-import { ErrorState } from '@/components/ui';
-import { fmtMoney, fmtNum, get } from '@/lib/api';
+/**
+ * Overview -- the product's home.
+ *
+ * The page is the workflow: Detect (what changed) → Explain (what is behind
+ * it) → Predict (what is likely next) → Investigate (could a campaign have
+ * caused it). Each step is a section with one figure worth acting on and a
+ * link into the engine that goes deeper.
+ *
+ * Every number is a value an endpoint returned. Nothing is computed here
+ * beyond picking rows (the highest week, the latest full week), and the
+ * "Explain" panels are static definitions, never generated text.
+ */
 
-type Overview = {
+import { useEffect, useId, useState } from 'react';
+import { CaveatBar } from '@/components/Caveats';
+import { Explain } from '@/components/explain';
+import {
+  CampaignSummary, ForecastSummary, SegmentShare, WeeklyChart, WeeklyTable,
+  type Campaign, type Flagged, type Forecast, type Segment, type Weekly,
+} from '@/components/overview';
+import {
+  ActionLink, Callout, ErrorState, PageHeader, Section, Skeleton, Stat,
+} from '@/components/ui';
+import { Workflow } from '@/components/workflow';
+import { fmtMoney, fmtNum, get } from '@/lib/api';
+import { EXAMPLES } from '@/lib/examples';
+import {
+  ENROLMENT_FLOOR_WEEK, STEPS, askHref, driversQuestion, flaggedSummary, forecastDepartment,
+  latestFullWeek, peakWeek,
+} from '@/lib/overview.mjs';
+
+type Totals = {
   total_revenue: number; total_baskets: number; total_households: number;
   avg_basket_value: number; total_units: number; weeks_covered: number;
+  window_basis?: string;
 };
-type Weekly = { week_no: number; revenue: string; baskets: number;
-  rolling_7wk_avg: string; is_partial_week: boolean };
-type Segment = { segment: string; households: number; pct_of_revenue: string;
-  segment_revenue: string; avg_baskets: string };
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+// The campaign the Causal page leads with: the least contaminated one.
+const CAMPAIGN_ID = 26;
+
+/** One GET with its own loading and error state, so a slow or failed section
+ *  never blanks the rest of the page. Earlier data stays up while a refetch
+ *  (a new department) is in flight. */
+function useApi<T>(path: string, attempt: number) {
+  const [state, setState] = useState<{ data: T | null; error: unknown; loading: boolean }>(
+    { data: null, error: null, loading: true });
+  useEffect(() => {
+    let live = true;
+    setState((s) => ({ ...s, loading: true }));
+    get<T>(path)
+      .then((data) => { if (live) setState({ data, error: null, loading: false }); })
+      .catch((error) => { if (live) setState({ data: null, error, loading: false }); });
+    return () => { live = false; };
+  }, [path, attempt]);
+  return state;
+}
+
+const stepLabel = (key: string) => {
+  const i = STEPS.findIndex((s) => s.key === key);
+  return { eyebrow: `${i + 1} · ${STEPS[i].verb}`, title: STEPS[i].question };
+};
+
+const verified = (benchmark: string) => EXAMPLES.find((e) => e.benchmark === benchmark)?.question;
+
+function Fact({ label, value, sub }: { label: string; value: string; sub: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-slate-400">{sub}</div>}
+    <div className="border-l-2 border-rule pl-3">
+      <dt className="text-xs uppercase tracking-wide text-muted">{label}</dt>
+      <dd className="mt-0.5 text-xl font-semibold tabular-nums text-ink">{value}</dd>
+      <dd className="text-xs text-muted">{sub}</dd>
     </div>
   );
 }
 
 export default function OverviewPage() {
-  const [ov, setOv] = useState<Overview | null>(null);
-  const [weekly, setWeekly] = useState<Weekly[]>([]);
-  const [segments, setSegments] = useState<Segment[]>([]);
-  const [departments, setDepartments] = useState<string[]>([]);
-  const [dept, setDept] = useState<string>('');
-  const [error, setError] = useState<unknown>(null);
-  // These two used to fail silently (.catch(() => {})): the drill-down or the
-  // segment chart simply vanished with no explanation.
-  const [deptError, setDeptError] = useState<unknown>(null);
-  const [segError, setSegError] = useState<unknown>(null);
-  const [loading, setLoading] = useState(true);
+  const id = useId();
+  const [dept, setDept] = useState('');
   const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    get<{ items: { department: string }[] }>('/api/v1/departments')
-      .then((d) => { setDepartments(d.items.map((x) => x.department)); setDeptError(null); })
-      .catch(setDeptError);
-    get<{ items: Segment[] }>('/api/v1/segments/rfm')
-      .then((d) => { setSegments(d.items); setSegError(null); })
-      .catch(setSegError);
-  }, [attempt]);
-
-  // Drill-down: department filter re-queries the server rather than filtering
-  // client-side, so the numbers are always computed by SQL.
-  useEffect(() => {
-    setLoading(true);
-    const q = dept ? `?department=${encodeURIComponent(dept)}` : '';
-    Promise.all([
-      get<Overview>(`/api/v1/overview${q}`),
-      get<{ items: Weekly[] }>(`/api/v1/revenue/weekly${q}`),
-    ])
-      .then(([o, w]) => { setOv(o); setWeekly(w.items); setError(null); })
-      .catch(setError)
-      .finally(() => setLoading(false));
-  }, [dept, attempt]);
-
   const retry = () => setAttempt((n) => n + 1);
+  const q = dept ? `?department=${encodeURIComponent(dept)}` : '';
+
+  // The department filter re-queries the server, so filtered figures are
+  // computed by SQL, never by trimming rows in the browser.
+  const totals = useApi<Totals>(`/api/v1/overview${q}`, attempt);
+  const weekly = useApi<{ items: Weekly[] }>(`/api/v1/revenue/weekly${q}`, attempt);
+  const departments = useApi<{ items: { department: string }[] }>('/api/v1/departments', attempt);
+  const segments = useApi<{ items: Segment[] }>('/api/v1/segments/rfm', attempt);
+  const anomalies = useApi<{ items: Flagged[]; note?: string; z_threshold: number }>('/api/v1/ai/anomalies', attempt);
+  const servable = useApi<{ items: { department: string; servable: boolean }[] }>(
+    '/api/v1/forecast/departments', attempt);
+  const fcDept = forecastDepartment(
+    dept, (servable.data?.items ?? []).filter((d) => d.servable).map((d) => d.department));
+  const forecast = useApi<Forecast>(
+    `/api/v1/forecast?department=${encodeURIComponent(fcDept)}`, attempt);
+  const campaign = useApi<Campaign>(`/api/v1/causal/analysis/${CAMPAIGN_ID}`, attempt);
+
+  const weeks = weekly.data?.items ?? [];
+  const peak = peakWeek(weeks);
+  const latest = latestFullWeek(weeks);
+  // The detector runs on all departments together, so its flags are only
+  // drawn on the all-department series.
+  const flagged = dept ? [] : anomalies.data?.items ?? [];
+  const flags = flaggedSummary(flagged);
+  const top = segments.data?.items[0];
+  const detect = stepLabel('detect');
+  const explain = stepLabel('explain');
+  const predict = stepLabel('predict');
+  const investigate = stepLabel('investigate');
+  const segmentQuestion = verified('pub-07');
+  const departmentQuestion = verified('pub-02');
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Executive overview</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {dept ? `Filtered to ${dept}` : 'All departments'}
-          </p>
+    <div className="space-y-8">
+      <PageHeader eyebrow="Detect → Explain → Predict → Investigate"
+                  title="What changed, what is likely next, and what caused it">
+        Two years of grocery purchases from 2,500 households, turned into answers you can check.
+        PostgreSQL and tested statistical models compute every figure. A language model only
+        drafts SQL; it never produces a number.
+      </PageHeader>
+
+      <Workflow />
+
+      <section aria-labelledby={`${id}-glance`} className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id={`${id}-glance`} className="font-display text-lg leading-tight text-ink">
+              The panel at a glance
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              {dept ? `Filtered to ${dept}` : 'All departments'}
+              {totals.data ? ` · ${totals.data.weeks_covered} weeks` : ''}
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-ink-2">
+            Department
+            <select value={dept} onChange={(e) => setDept(e.target.value)}
+              className="min-h-control max-w-[14rem] rounded-input border border-rule bg-paper px-3 text-sm text-ink">
+              <option value="">All departments</option>
+              {(departments.data?.items ?? []).map((d) => (
+                <option key={d.department} value={d.department}>{d.department}</option>
+              ))}
+            </select>
+          </label>
         </div>
-        <label className="text-sm">
-          <span className="mr-2 text-slate-500">Drill down</span>
-          <select
-            value={dept}
-            onChange={(e) => setDept(e.target.value)}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
-          >
-            <option value="">All departments</option>
-            {departments.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </label>
-      </div>
 
-      {error != null && <ErrorState error={error} what="the overview" onRetry={retry} />}
-      {deptError != null && (
-        <ErrorState error={deptError} what="the department list" onRetry={retry} />
-      )}
-
-      {ov && (
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-          <Stat label="Revenue" value={fmtMoney(ov.total_revenue)} sub="net of retail discount" />
-          <Stat label="Baskets" value={fmtNum(ov.total_baskets)} />
-          <Stat label="Households" value={fmtNum(ov.total_households)} />
-          <Stat label="Avg basket" value={fmtMoney(ov.avg_basket_value)} />
-          <Stat label="Units" value={fmtNum(ov.total_units)} sub="excludes weighted goods" />
-        </div>
-      )}
-
-      <section className="rounded-lg border border-slate-200 bg-white p-5">
-        <h2 className="text-sm font-semibold">Weekly revenue</h2>
-        <p className="mb-3 text-xs text-slate-500">
-          Seven-week centred rolling average. A trailing average would lag the
-          series by half its width and misplace turning points.
-        </p>
-        {loading && <div className="py-16 text-center text-sm text-slate-400">Loading…</div>}
-        {!loading && weekly.length > 0 && (
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={weekly.map((w) => ({
-              week: w.week_no,
-              revenue: Number(w.revenue),
-              trend: w.rolling_7wk_avg ? Number(w.rolling_7wk_avg) : null,
-              partial: w.is_partial_week,
-            }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="week" tick={{ fontSize: 11 }}
-                     label={{ value: 'week', position: 'insideBottom', offset: -4, fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-              <Tooltip formatter={(v: number) => fmtMoney(v)} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Line type="monotone" dataKey="revenue" stroke="#94a3b8" dot={false} name="weekly" />
-              <Line type="monotone" dataKey="trend" stroke="#0f172a" dot={false}
-                    strokeWidth={2} name="7-week centred avg" />
-            </LineChart>
-          </ResponsiveContainer>
+        {totals.error != null && <ErrorState error={totals.error} what="the totals" onRetry={retry} />}
+        {departments.error != null && (
+          <ErrorState error={departments.error} what="the department list" onRetry={retry} />
         )}
-        <p className="mt-2 text-xs text-slate-400">
-          Weeks 1 and 102 are 5 and 6 days rather than 7; their totals are not
-          comparable to a full week.
-        </p>
+        {totals.data ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+            <Stat label="Revenue" value={fmtMoney(totals.data.total_revenue)} sub="net of retailer discounts" />
+            <Stat label="Baskets" value={fmtNum(totals.data.total_baskets)} sub="shopping trips" />
+            <Stat label="Households" value={fmtNum(totals.data.total_households)} sub="made a purchase" />
+            <Stat label="Average basket" value={fmtMoney(totals.data.avg_basket_value)} sub="revenue per trip" />
+            <Stat label="Units" value={fmtNum(totals.data.total_units)} sub="excludes goods sold by weight" />
+          </div>
+        ) : totals.error == null && <Skeleton label="the totals" className="h-24" />}
+        <Explain metrics={['revenue', 'baskets', 'households', 'avg_basket', 'units']}
+                 notes={{ households: [totals.data?.window_basis] }} />
       </section>
 
-      {segments.length > 0 && (
-        <section className="rounded-lg border border-slate-200 bg-white p-5">
-          <h2 className="text-sm font-semibold">Revenue by RFM segment</h2>
-          <p className="mb-3 text-xs text-slate-500">
-            Quintile scores on recency, frequency and monetary value. Recency is
-            measured against panel end, not today.
-          </p>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={segments.map((s) => ({
-              segment: s.segment, revenue: Number(s.segment_revenue),
-              share: Number(s.pct_of_revenue), households: s.households,
-            }))} margin={{ bottom: 40 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="segment" tick={{ fontSize: 10 }} angle={-20}
-                     textAnchor="end" interval={0} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-              <Tooltip formatter={(v: number, n) => n === 'revenue' ? fmtMoney(v) : v} />
-              <Bar dataKey="revenue" fill="#0f172a" name="revenue" />
-            </BarChart>
-          </ResponsiveContainer>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-            {segments.slice(0, 4).map((s) => (
-              <div key={s.segment} className="rounded border border-slate-100 p-2">
-                <div className="font-medium">{s.segment}</div>
-                <div className="text-slate-500">
-                  {fmtNum(s.households)} households · {s.pct_of_revenue}% of revenue
-                </div>
-              </div>
-            ))}
+      <Section id="what-changed" eyebrow={detect.eyebrow} title={detect.title}
+        description={`Revenue by week${dept ? ` for ${dept}` : ''}. The early rise is households joining the panel, so it is marked and should not be read as growth.`}>
+        {weekly.error != null && <ErrorState error={weekly.error} what="weekly revenue" onRetry={retry} />}
+        {weeks.length === 0 && weekly.error == null && <Skeleton label="weekly revenue" className="h-72" />}
+        {weeks.length > 0 && (
+          <div className="space-y-5">
+            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {peak && (
+                <Fact label="Busiest full week" value={fmtMoney(peak.revenue)}
+                      sub={`Week ${peak.week_no}, starting ${peak.start_date}`} />
+              )}
+              {latest && (
+                <Fact label="Latest full week" value={fmtMoney(latest.revenue)}
+                      sub={`Week ${latest.week_no} · 7-week average ${fmtMoney(latest.rolling_7wk_avg)}`} />
+              )}
+              <Fact label="Flagged by the detector"
+                    value={dept ? '—' : anomalies.data ? `${flags.count} week${flags.count === 1 ? '' : 's'}` : '…'}
+                    sub={dept ? 'It runs on all departments together'
+                      : anomalies.error != null ? 'Could not be loaded'
+                      : `Revenue at least ${anomalies.data?.z_threshold ?? '…'} standard deviations from the mean`} />
+            </dl>
+
+            <WeeklyChart weekly={weeks} flagged={flagged} floor={ENROLMENT_FLOOR_WEEK} department={dept} />
+
+            {!dept && anomalies.data && (
+              <Callout tone={flags.count > 0 ? 'caution' : 'neutral'} title={flags.headline}>
+                {flags.detail}
+              </Callout>
+            )}
+            {!dept && anomalies.error != null && (
+              <ErrorState error={anomalies.error} what="the flagged weeks" onRetry={retry} />
+            )}
+
+            <div className="flex flex-wrap gap-3">
+              {peak && !dept ? (
+                <ActionLink primary href={askHref(driversQuestion(peak.week_no))}>
+                  Ask what drove week {peak.week_no}
+                </ActionLink>
+              ) : (
+                <ActionLink primary href="/query">Ask about this</ActionLink>
+              )}
+            </div>
+
+            <WeeklyTable weekly={weeks} flagged={flagged} floor={ENROLMENT_FLOOR_WEEK} />
+            <Explain metrics={['weekly_revenue', 'flagged_weeks']}
+                     notes={{ flagged_weeks: [anomalies.data?.note] }} />
           </div>
-        </section>
-      )}
+        )}
+      </Section>
 
-      {segError != null && (
-        <ErrorState error={segError} what="the RFM segments" onRetry={retry} />
-      )}
+      <Section eyebrow={explain.eyebrow} title={explain.title}
+        description="Who the revenue comes from. Any question about it goes to Ask, where PostgreSQL computes the answer and shows its working.">
+        {segments.error != null && <ErrorState error={segments.error} what="the customer segments" onRetry={retry} />}
+        {!segments.data && segments.error == null && <Skeleton label="the customer segments" className="h-56" />}
+        {segments.data && top && (
+          <div className="space-y-5">
+            <p className="max-w-[65ch] font-display text-xl leading-snug text-ink">
+              {top.segment} are {top.pct_of_panel}% of households and {top.pct_of_revenue}% of revenue.
+            </p>
+            <SegmentShare segments={segments.data.items} />
+            <div className="flex flex-wrap gap-3">
+              {segmentQuestion && (
+                <ActionLink primary href={askHref(segmentQuestion)}>Ask which segment leads</ActionLink>
+              )}
+              {departmentQuestion && (
+                <ActionLink href={askHref(departmentQuestion)}>Ask which departments earn most</ActionLink>
+              )}
+            </div>
+            <Explain metrics={['rfm_segments']} />
+          </div>
+        )}
+      </Section>
 
-      <CaveatBar calendar panel revenue />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Section eyebrow={predict.eyebrow} title={predict.title}>
+          {forecast.error != null && <ErrorState error={forecast.error} what="the forecast" onRetry={retry} />}
+          {!forecast.data && forecast.error == null && <Skeleton label="the forecast" className="h-56" />}
+          {forecast.data && (
+            <div className="space-y-5">
+              {dept && fcDept !== dept && (
+                <p className="text-sm text-muted">No forecast is served for {dept}; showing {fcDept}.</p>
+              )}
+              <ForecastSummary f={forecast.data} />
+              <ActionLink primary href={`/forecast?department=${encodeURIComponent(fcDept)}`}>
+                Open the forecast
+              </ActionLink>
+              <Explain metrics={['forecast']}
+                       notes={{ forecast: [...forecast.data.caveats, `Interval method: ${forecast.data.interval.method}.`] }} />
+            </div>
+          )}
+        </Section>
+
+        <Section eyebrow={investigate.eyebrow} title={investigate.title}>
+          {campaign.error != null && <ErrorState error={campaign.error} what="the campaign estimate" onRetry={retry} />}
+          {!campaign.data && campaign.error == null && <Skeleton label="the campaign estimate" className="h-56" />}
+          {campaign.data && (
+            <div className="space-y-5">
+              <CampaignSummary a={campaign.data} />
+              <ActionLink primary href="/causal">Investigate campaigns</ActionLink>
+              <Explain metrics={['campaign_effect']}
+                       notes={{ campaign_effect: [campaign.data.parallel_trends.verdict, ...campaign.data.warnings] }} />
+            </div>
+          )}
+        </Section>
+      </div>
+
+      <CaveatBar collapsible calendar panel revenue />
     </div>
   );
 }
