@@ -19,7 +19,8 @@ import {
   AnswerCard, AskProgress, EvidencePanel, ResultChart, ResultTable, TABLE_ROWS_SHOWN,
   ValidationTrail, type Health, type QueryResult,
 } from '@/components/ask';
-import { Callout, Disclosure, ErrorState, type Tone } from '@/components/ui';
+import { Callout, Disclosure, ErrorState, PageHeader, type Tone } from '@/components/ui';
+import { Workflow } from '@/components/workflow';
 import { answerSentence, chartSpec, evidence, outcome } from '@/lib/answer.mjs';
 import { ApiError, get, post } from '@/lib/api';
 import { EXAMPLES } from '@/lib/examples';
@@ -125,17 +126,11 @@ export default function AskPage() {
 
   return (
     <div className="max-w-4xl space-y-8">
-      <header>
-        <p className="font-mono text-2xs uppercase tracking-[0.08em] text-muted">
-          Ask · published aggregate data
-        </p>
-        <h1 className="mt-2 font-display text-3xl leading-tight text-ink sm:text-4xl">Ask the data</h1>
-        <p className="mt-3 max-w-[65ch] text-base text-ink-2">
-          Ask a business question in plain English. A language model drafts the SQL and never
-          computes a number: PostgreSQL does, after the query passes read-only validation checks.
-          The evidence behind every answer is one click away.
-        </p>
-      </header>
+      <PageHeader eyebrow="Explain · published aggregate data" title="Ask the data">
+        Ask a business question in plain English. A language model drafts the SQL and never
+        computes a number: PostgreSQL does, after the query passes read-only validation checks.
+        The evidence behind every answer is one click away.
+      </PageHeader>
 
       <form
         onSubmit={(e) => { e.preventDefault(); ask(q); }}
@@ -204,6 +199,8 @@ export default function AskPage() {
 
         {!busy && res && <Outcome res={res} asked={asked} health={health} />}
       </div>
+
+      <Workflow current="explain" heading="Where next" />
     </div>
   );
 }

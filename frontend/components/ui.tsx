@@ -10,6 +10,7 @@
  * caller, and these components only add the colour family.
  */
 
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { publicMessage, technicalDetail } from '@/lib/api';
 
@@ -23,6 +24,46 @@ const TONE: Record<Tone, { text: string; bg: string; rule: string; solid: string
   accent: { text: 'text-accent', bg: 'bg-paper-3', rule: 'border-rule', solid: 'bg-accent text-accent-ink' },
 };
 
+/** The top of every page: where you are, the page's one <h1>, and a lead. */
+export function PageHeader({ eyebrow, title, children }: {
+  eyebrow: string; title: string; children?: ReactNode;
+}) {
+  return (
+    <header>
+      <p className="font-mono text-2xs uppercase tracking-[0.08em] text-muted">{eyebrow}</p>
+      <h1 className="mt-2 font-display text-3xl leading-tight text-ink sm:text-4xl">{title}</h1>
+      {children && <div className="mt-3 max-w-[65ch] text-base text-ink-2">{children}</div>}
+    </header>
+  );
+}
+
+/** A link that reads as the next action. `primary` is for the one step a
+ *  section most wants taken. */
+export function ActionLink({ href, children, primary = false }: {
+  href: string; children: ReactNode; primary?: boolean;
+}) {
+  return (
+    <Link href={href}
+      className={`inline-flex min-h-control items-center rounded-input px-4 text-sm font-medium ${primary
+        ? 'bg-ink text-paper hover:bg-ink-2'
+        : 'border border-rule bg-paper text-ink hover:border-rule-firm'}`}>
+      {children}
+      <span aria-hidden="true" className="ml-2">→</span>
+    </Link>
+  );
+}
+
+/** One term/description pair in a <dl>: the layout shared by Ask's evidence
+ *  and the Explain panel. */
+export function FactRow({ term, children }: { term: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-1 border-b border-rule py-3 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-4">
+      <dt className="text-xs font-semibold uppercase tracking-wide text-muted">{term}</dt>
+      <dd className="min-w-0 text-sm text-ink-2">{children}</dd>
+    </div>
+  );
+}
+
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <div className={`rounded-card border border-rule bg-paper p-5 ${className}`}>{children}</div>
@@ -30,11 +71,15 @@ export function Card({ children, className = '' }: { children: ReactNode; classN
 }
 
 /** A titled region. The heading is a real <h2> in the display face. */
-export function Section({ title, description, children, className = '' }: {
+export function Section({ title, description, children, className = '', id, eyebrow }: {
   title: string; description?: ReactNode; children: ReactNode; className?: string;
+  id?: string; eyebrow?: string;
 }) {
   return (
-    <section className={`rounded-card border border-rule bg-paper p-5 ${className}`}>
+    <section id={id} className={`scroll-mt-4 rounded-card border border-rule bg-paper p-5 ${className}`}>
+      {eyebrow && (
+        <p className="mb-1 font-mono text-2xs uppercase tracking-[0.08em] text-muted">{eyebrow}</p>
+      )}
       <h2 className="font-display text-lg leading-tight text-ink">{title}</h2>
       {description && <p className="mt-1 max-w-[70ch] text-sm text-muted">{description}</p>}
       <div className="mt-4">{children}</div>
@@ -51,7 +96,9 @@ export function Stat({ label, value, sub, emphasis }: {
       <div className={`text-xs uppercase tracking-wide ${emphasis ? 'text-paper-3' : 'text-muted'}`}>
         {label}
       </div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+      {/* break-words: a range like "$28,691 – $69,807" must wrap inside a
+          narrow card rather than push the page sideways. */}
+      <div className="mt-1 break-words text-2xl font-semibold tabular-nums">{value}</div>
       {sub && <div className={`mt-1 text-xs ${emphasis ? 'text-paper-3' : 'text-muted'}`}>{sub}</div>}
     </div>
   );

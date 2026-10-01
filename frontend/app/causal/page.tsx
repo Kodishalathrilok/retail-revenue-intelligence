@@ -16,7 +16,13 @@ import {
   CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { CaveatBar } from '@/components/Caveats';
-import { ErrorState } from '@/components/ui';
+import {
+  AXIS_TICK, CHART, GRID_PROPS, LEGEND_STYLE, TOOLTIP_STYLE,
+} from '@/components/chart-theme';
+import {
+  Badge, Callout, ErrorState, PageHeader, Skeleton, Stat, type Tone,
+} from '@/components/ui';
+import { Workflow } from '@/components/workflow';
 import { fmtNum, get } from '@/lib/api';
 
 type Analysis = {
@@ -35,26 +41,11 @@ type Analysis = {
   confidence: string; warnings: string[];
 };
 
-const VERDICT_STYLE: Record<string, string> = {
-  CREDIBLE: 'bg-emerald-600',
-  WEAK: 'bg-amber-600',
-  'NOT CREDIBLE': 'bg-red-600',
+const VERDICT_TONE: Record<string, Tone> = {
+  CREDIBLE: 'positive',
+  WEAK: 'caution',
+  'NOT CREDIBLE': 'negative',
 };
-
-function EstimateCard({ label, value, sub, emphasis }: {
-  label: string; value: string; sub: string; emphasis?: boolean;
-}) {
-  return (
-    <div className={`rounded-lg border p-4 ${emphasis
-      ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white'}`}>
-      <div className={`text-xs uppercase tracking-wide ${emphasis ? 'text-slate-300' : 'text-slate-500'}`}>
-        {label}
-      </div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-      <div className={`mt-1 text-xs ${emphasis ? 'text-slate-400' : 'text-slate-500'}`}>{sub}</div>
-    </div>
-  );
-}
 
 function AnalysisPanel({ a }: { a: Analysis }) {
   const merged = a.pre_period_series.treated.map((t) => ({
@@ -62,36 +53,37 @@ function AnalysisPanel({ a }: { a: Analysis }) {
     treated: t.mean_spend,
     control: a.pre_period_series.control.find((c) => c.week_no === t.week_no)?.mean_spend ?? null,
   }));
+  const chartSummary = `Line chart of mean weekly spend per household over the `
+    + `${a.parallel_trends.pre_weeks} weeks before campaign ${a.campaign_id}, treated against `
+    + `control. Slopes: treated ${a.parallel_trends.treated_slope.toFixed(4)}, control `
+    + `${a.parallel_trends.control_slope.toFixed(4)}.`;
 
   return (
-    <div className="space-y-5 rounded-lg border border-slate-200 bg-slate-50/50 p-5">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">Campaign {a.campaign_id}</h2>
-        <span className={`rounded px-2 py-0.5 text-xs font-semibold text-white ${
-          VERDICT_STYLE[a.confidence] ?? 'bg-slate-600'}`}>
-          {a.confidence}
-        </span>
-        <span className="text-xs text-slate-500">
+    <div className="space-y-5 rounded-card border border-rule bg-paper-2 p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="font-display text-lg leading-tight text-ink">Campaign {a.campaign_id}</h2>
+        <Badge tone={VERDICT_TONE[a.confidence] ?? 'neutral'}>{a.confidence}</Badge>
+        <span className="text-xs text-muted">
           {fmtNum(a.treated_n)} treated · {fmtNum(a.control_n)} control ·{' '}
-          <span className={a.contaminated_pct > 25 ? 'font-semibold text-red-600' : ''}>
+          <span className={a.contaminated_pct > 25 ? 'font-semibold text-negative' : ''}>
             {a.contaminated_pct}% contaminated
           </span>
         </span>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <EstimateCard
+        <Stat
           label="Naive before/after"
           value={a.naive_difference >= 0 ? `+${a.naive_difference.toFixed(3)}` : a.naive_difference.toFixed(3)}
           sub="Treated group only. What a dashboard reports when nobody asks about a control group."
         />
-        <EstimateCard
+        <Stat
           emphasis
           label="Difference-in-differences"
           value={a.did_estimate >= 0 ? `+${a.did_estimate.toFixed(3)}` : a.did_estimate.toFixed(3)}
           sub={`95% CI [${a.ci_low.toFixed(2)}, ${a.ci_high.toFixed(2)}] · p = ${a.did_pvalue.toFixed(3)}`}
         />
-        <EstimateCard
+        <Stat
           label="Adjusted for confounders"
           value={a.adjusted_estimate === null ? '—'
             : a.adjusted_estimate >= 0 ? `+${a.adjusted_estimate.toFixed(3)}` : a.adjusted_estimate.toFixed(3)}
@@ -99,52 +91,51 @@ function AnalysisPanel({ a }: { a: Analysis }) {
         />
       </div>
 
-      <div className={`rounded-lg border p-4 ${a.parallel_trends.passed
-        ? 'border-emerald-200 bg-emerald-50' : 'border-red-300 bg-red-50'}`}>
-        <div className="flex items-center gap-2">
-          <span className={`rounded px-2 py-0.5 text-xs font-semibold text-white ${
-            a.parallel_trends.passed ? 'bg-emerald-600' : 'bg-red-600'}`}>
+      <div className={`rounded-card border p-4 ${a.parallel_trends.passed
+        ? 'border-positive-rule bg-positive-bg' : 'border-negative-rule bg-negative-bg'}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={a.parallel_trends.passed ? 'positive' : 'negative'}>
             {/* "Not rejected", never "hold": a pass on this low-power test is
                 absence of evidence of a pre-trend, as the verdict below says. */}
             PARALLEL TRENDS {a.parallel_trends.passed ? 'NOT REJECTED' : 'VIOLATED'}
-          </span>
-          <span className="text-xs text-slate-600">
+          </Badge>
+          <span className="text-xs text-ink-2">
             interaction p = {a.parallel_trends.interaction_pvalue.toFixed(4)} ·{' '}
             {a.parallel_trends.pre_weeks} pre-period weeks
           </span>
         </div>
-        <p className="mt-2 text-sm text-slate-700">{a.parallel_trends.verdict}</p>
+        <p className="mt-2 text-sm text-ink-2">{a.parallel_trends.verdict}</p>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <h3 className="text-sm font-semibold">Pre-period trends</h3>
-        <p className="mb-2 text-xs text-slate-500">
+      <figure className="rounded-card border border-rule bg-paper p-4" aria-label={chartSummary}>
+        <h3 className="text-sm font-semibold text-ink">Pre-period trends</h3>
+        <p className="mb-2 text-xs text-muted">
           Mean weekly spend per household BEFORE the campaign. If these diverge,
           difference-in-differences attributes that divergence to the campaign.
         </p>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={merged}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey="week" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} />
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Line type="monotone" dataKey="treated" stroke="#dc2626" dot={false} name="treated" />
-            <Line type="monotone" dataKey="control" stroke="#0f172a" dot={false} name="control" />
+            <CartesianGrid {...GRID_PROPS} />
+            <XAxis dataKey="week" tick={AXIS_TICK} />
+            <YAxis tick={AXIS_TICK} />
+            <Tooltip {...TOOLTIP_STYLE} />
+            <Legend wrapperStyle={LEGEND_STYLE} />
+            <Line type="monotone" dataKey="treated" stroke={CHART.compare} dot={false} name="treated" />
+            <Line type="monotone" dataKey="control" stroke={CHART.ink} dot={false} name="control" />
           </LineChart>
         </ResponsiveContainer>
-        <p className="mt-1 text-xs text-slate-400">
+        <p className="mt-1 text-xs text-muted">
           slopes — treated {a.parallel_trends.treated_slope.toFixed(4)} ·
           control {a.parallel_trends.control_slope.toFixed(4)}
         </p>
-      </div>
+      </figure>
 
       {a.warnings.length > 0 && (
-        <ul className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-4">
-          {a.warnings.map((w, i) => (
-            <li key={i} className="text-sm text-amber-900">⚠ {w}</li>
-          ))}
-        </ul>
+        <Callout tone="caution" title={a.warnings.length === 1 ? 'Warning' : 'Warnings'}>
+          <ul className="list-disc space-y-1.5 pl-4">
+            {a.warnings.map((w) => <li key={w}>{w}</li>)}
+          </ul>
+        </Callout>
       )}
     </div>
   );
@@ -170,26 +161,23 @@ export default function CausalPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Causal analysis</h1>
-        <p className="mt-1 max-w-3xl text-sm text-slate-500">
-          Difference-in-differences on a real dunnhumby campaign. SQL builds the
-          panels, statsmodels estimates the effect, and the language model only
-          proposes candidate confounders — it never produces an estimate.
-        </p>
-      </div>
+      <PageHeader eyebrow="Investigate · campaign effects" title="Causal analysis">
+        Difference-in-differences on a real dunnhumby campaign. SQL builds the
+        panels, statsmodels estimates the effect, and the language model only
+        proposes candidate confounders — it never produces an estimate.
+      </PageHeader>
 
       {err != null && <ErrorState error={err} what="campaign 26" onRetry={retry} />}
 
       {clean ? <AnalysisPanel a={clean} /> : err == null && (
-        <div className="py-16 text-center text-sm text-slate-400">Computing…</div>
+        <Skeleton label="the campaign analysis" className="h-96" />
       )}
 
       {stress && (
         <div>
-          <div className="mb-3 rounded-lg border border-slate-300 bg-white p-4">
-            <h2 className="text-sm font-semibold">Contaminated comparison</h2>
-            <p className="mt-1 text-sm text-slate-600">
+          <div className="mb-3 rounded-card border border-rule bg-paper p-4">
+            <h2 className="font-display text-lg leading-tight text-ink">Contaminated comparison</h2>
+            <p className="mt-1 max-w-[70ch] text-sm text-ink-2">
               Campaign 18 is the largest campaign in the dataset and one of the
               worst candidates: 90.8% of its enrolled households were
               simultaneously in an overlapping campaign. It is shown here
@@ -205,6 +193,8 @@ export default function CausalPage() {
         <ErrorState error={stressErr} what="the contaminated comparison (campaign 18)"
                     onRetry={retry} />
       )}
+
+      <Workflow current="investigate" heading="Where next" />
 
       <CaveatBar calendar panel revenue />
     </div>
