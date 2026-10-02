@@ -1,0 +1,69 @@
+name: Production check
+
+# A daily, read-only look at the live site: scripts/production_check.py sends
+# plain GET requests and nothing else. It makes no model call, so it cannot
+# touch the daily LLM cap, and it needs no secret -- everything it fetches is
+# what an anonymous visitor's browser fetches.
+#
+# When a check fails, the run opens an issue titled "Production check failed"
+# (or comments on the open one), and GitHub's own notifications do the rest.
+
+on:
+  schedule:
+    # 06:17 UTC every day. Off the hour on purpose: scheduled runs queued at
+    # :00 are the ones GitHub delays or drops under load.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the live site
+        id: check
+        # Standard library only, so there is nothing to install.
+        run: |
+          set -o pipefail
+          python scripts/production_check.py | tee check-output.txt
+
+      - name: Open or update the issue
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "Production check failed"
+        run: |
+          {
+            echo "The production check failed on $(date -u '+%Y-%m-%d at %H:%M UTC')."
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo "Failing checks:"
+            echo
+            echo '```'
+            grep '^FAIL' check-output.txt || cat check-output.txt
+            echo '```'
+            echo
+            echo "To reproduce: \`python scripts/production_check.py\`"
+          } > issue-body.md
+
+          number=$(gh issue list --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title == \"$TITLE\")][0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file issue-body.md
+          else
+            gh issue create --title "$TITLE" --body-file issue-body.md
+          fi
