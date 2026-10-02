@@ -321,8 +321,12 @@ export default function ForecastPage() {
                           connectNulls isAnimationActive={false} />
                     <ReferenceLine x={forecast.observed_until_week}
                                    stroke={CHART.context} strokeDasharray="2 2"
+                                   /* insideTopRight, so the text ends at the line:
+                                      the line sits one week from the right edge,
+                                      and a label centred on it was cut off on a
+                                      phone. */
                                    label={{ value: 'last observed', fontSize: 10,
-                                            position: 'top', fill: CHART.axis }} />
+                                            position: 'insideTopRight', fill: CHART.axis }} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
