@@ -61,7 +61,7 @@ export function CaveatBar({
   panel?: boolean;
   revenue?: boolean;
   /** Behind a disclosure, for a page whose sections already state their own
-   *  limits inline (the Overview). The analysis pages keep it open. */
+   *  limits inline (the Overview, and Causal with its assumptions list). */
   collapsible?: boolean;
 }) {
   const caveats = (

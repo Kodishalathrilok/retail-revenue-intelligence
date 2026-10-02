@@ -86,13 +86,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </a>
 
         <header className="border-b border-rule bg-paper">
-          <div className="mx-auto max-w-6xl px-6 pt-5 sm:pt-7">
+          <div className="mx-auto max-w-6xl px-6 pt-3 sm:pt-7">
             {/* Band 1 — identity. Deliberately not an <h1>: every page owns its
-                own, and a second one here would flatten the outline. */}
+                own, and a second one here would flatten the outline.
+
+                min-h-control: at phone width the wordmark is one 26px line,
+                under the 44px hit target. The band's top padding gives the
+                difference back, so the masthead is no taller for it. */}
             <div className="text-center">
               <Link
                 href="/"
-                className="inline-block font-display text-mast tracking-[-0.01em] text-ink"
+                className="inline-flex min-h-control items-center font-display text-mast tracking-[-0.01em] text-ink"
               >
                 Retail Revenue Intelligence
               </Link>

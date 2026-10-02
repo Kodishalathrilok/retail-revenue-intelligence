@@ -64,6 +64,18 @@ export function FactRow({ term, children }: { term: string; children: ReactNode 
   );
 }
 
+/** One labelled figure in a <dl>, quieter than a Stat card: for the figures
+ *  that support a headline rather than being one. */
+export function Fact({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
+  return (
+    <div className="border-l-2 border-rule pl-3">
+      <dt className="text-xs uppercase tracking-wide text-muted">{label}</dt>
+      <dd className="mt-0.5 break-words text-xl font-semibold tabular-nums text-ink">{value}</dd>
+      {sub && <dd className="text-xs text-muted">{sub}</dd>}
+    </div>
+  );
+}
+
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <div className={`rounded-card border border-rule bg-paper p-5 ${className}`}>{children}</div>
@@ -171,7 +183,7 @@ export function ErrorState({ error, onRetry, what }: {
         )}
         {technical && (
           <details className="text-xs text-muted">
-            <summary className="cursor-pointer">Technical detail</summary>
+            <summary className="inline-flex min-h-control cursor-pointer items-center">Technical detail</summary>
             <code className="mt-1 block break-all font-mono">{technical}</code>
           </details>
         )}
