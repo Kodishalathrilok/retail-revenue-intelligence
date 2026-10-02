@@ -300,6 +300,47 @@ CI runs the test suite, `ruff`, the data-quality job against a real PostgreSQL
 and the frontend build on every pull request
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
+## Operations
+
+A scheduled GitHub Action
+([`.github/workflows/production-check.yml`](.github/workflows/production-check.yml))
+checks the live demo once a day, and can be started by hand from the Actions
+tab. When a check fails it opens an issue titled "Production check failed", or
+comments on the one already open, so the alert arrives through GitHub's own
+notifications.
+
+**What is checked**, with plain GET requests:
+
+- Overview, Ask, Forecast and Causal each return `200` and show their heading.
+- `/health` reports the published tier with its 23 tables.
+- The forecast endpoint returns a one-week-ahead forecast that sits inside its
+  range, with the baseline as the live predictor and the challenger marked not
+  deployed.
+- `/api/v1/causal/validation` returns its designed `503 LOCAL_ONLY`. A `200`,
+  or any other status, is a failure to investigate.
+- Nothing the Causal page shows states the parallel-trends assumption as an
+  established fact. The two phrases it looks for are in the script's config
+  block, and the scan covers the page's HTML, the scripts that build its
+  sentences, and the stored warnings it prints.
+
+**What is deliberately not checked:** anything that needs a model call. The
+script never asks a question and never calls an `/ai/` route, so it cannot
+spend the daily LLM cap. It reads no database and needs no secret. The cost of
+that choice is that a broken Ask answer would not be caught here.
+
+**Run it by hand:**
+
+```bash
+python scripts/production_check.py
+```
+
+It prints one line per check and exits non-zero if any fails. It uses the
+standard library only. The site URL and every expected value sit in one config
+block at the top of [`scripts/production_check.py`](scripts/production_check.py),
+and [`tests/test_production_check.py`](tests/test_production_check.py) ties that
+block to the page sources, so a deliberate change to a heading fails in CI
+instead of opening an issue the next morning.
+
 ## Further reading
 
 - [`docs/engineering-notes.md`](docs/engineering-notes.md): the long-form
