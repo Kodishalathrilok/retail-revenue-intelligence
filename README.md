@@ -1,635 +1,333 @@
 # Retail Revenue Intelligence Platform
 
-**Repository:** https://github.com/Kodishalathrilok/retail-revenue-intelligence
+**Live demo: https://retail-revenue-intelligence-flame.vercel.app**
 
-> **Live:** https://retail-revenue-intelligence-flame.vercel.app — the published
-> aggregate tier (23 tables). What a hosted visitor can and cannot do is under
-> *What runs where* below; the verified deployment, its roles and its smoke-test
-> results are in [`docs/deployment.md`](docs/deployment.md).
+RRIP turns two years of grocery purchases from the dunnhumby *Complete Journey*
+panel (2,595,732 transactions and 36,771,279 promotion-exposure rows from 2,500
+households) into answers a retail analyst can check: what changed, what is
+behind it, what is likely next week, and whether a campaign caused it. One rule
+shapes the whole system: **the language model interprets, and deterministic
+systems calculate.** A model drafts SQL or picks a department name. PostgreSQL,
+a tested forecaster and a difference-in-differences estimator produce every
+number, and each answer comes with the evidence behind it.
 
-Analytics platform over the dunnhumby *Complete Journey* household panel:
-2,595,732 transactions and 36,771,279 rows of promotional exposure across 2,500
-households and 711 days, in PostgreSQL 16.
+## The product loop
 
-Three questions, three engines, one rule — **the model interprets, deterministic
-systems calculate**:
+**Detect → Explain → Predict → Investigate → Measure**
 
-```
-DESCRIPTIVE   what happened?              -> validated NL->SQL
-PREDICTIVE    what happens next?          -> a fitted forecaster, scored on a
-                                             locked temporal test set
-CAUSAL        did the campaign cause it?  -> difference-in-differences
-```
+| Step | Question | Where | What computes it |
+|---|---|---|---|
+| **Detect** | What changed? | Overview | SQL over weekly revenue, with a z-score rule that flags unusual weeks |
+| **Explain** | What is behind it? | Ask | A model drafts SQL; validation gates check it; PostgreSQL runs it |
+| **Predict** | What is likely next week? | Forecast | A one-week-ahead forecast with a prediction interval and its measured error |
+| **Investigate** | Could a campaign have caused it? | Causal | Difference-in-differences with a confidence interval and a pre-trend test |
+| **Measure** | How far can each answer be trusted? | "Explain" on every figure, and [Evaluation evidence](#evaluation-evidence) | Benchmarks recorded in [`reports/eval/`](reports/eval/latest.md) |
 
-## Three things the data actually says
+The first four steps are the strip at the top of the app. Measure is not a
+page: it is the definition, source, calculation and limitation behind each
+figure, and the recorded benchmark behind each engine.
 
-**Revenue is far less concentrated than the 80/20 rule predicts.** Reaching 80%
-of revenue takes **11,865 products — 12.9% of the catalogue**, not 20%. The top
-1% of products carries 37.7%. Half of all revenue comes from just 2,295 products
-(2.5%). The tail is long and it matters: a range review that cut the bottom 80%
-of the catalogue would be cutting products that collectively earn a fifth of
-revenue.
+## Screenshots
 
-**One in five households generates almost half of revenue.** RFM segmentation
-puts 512 households (20.5% of the panel) in *Champions* — recent, frequent, high
-value — and they account for **45.6% of all revenue**. A further 116 households
-(4.6%) are high-value but lapsing, worth 7.3% of revenue between them. That
-second group is the actionable one: small enough to target individually, large
-enough to matter.
-
-**The strongest product affinities are cross-category, not within-category.**
-The highest lift pair in the data is `CEREAL/BREAKFAST` with `FROZEN` at
-**24.3× more often than chance** — and `FROZEN` appears in three of the top five
-pairs, coupling with cereal, refrigerated goods and snacks. The intuitive
-within-category pairs rank lower. `BABY FOODS` with `INFANT CARE` (18.0×) is the
-exception that shows the measure is working: a genuine shopping-mission pair.
-
-Full analyses in [`sql/analytics/`](sql/analytics/), one documented query per
-business question.
-
-## A note on what this data can and cannot support
-
-dunnhumby is a **panel**: households are recruited at the start of observation
-rather than acquired over time. **99.8% make their first purchase within the
-first 180 days** of a 711-day window — 70.5% within 90 days, median day 69 — and
-only 6 households of 2,500 first appear after day 180.
-
-Calendar-month cohorts therefore crowd into the first six months, and a "cohort
-comparison" would contrast early recruits against a handful of stragglers whose
-late first purchase reflects low shopping frequency, not late acquisition. The
-retention analysis uses **relative tenure** — each household on its own timeline
-from its first purchase — which measures how engagement decays with time
-observed and makes no acquisition claim. The output carries that basis as a
-column so it travels with the numbers.
-
-**On dates:** the source records `DAY` 1–711 with no published calendar anchor.
-`WEEK_NO` follows `(DAY + 8) / 7` exactly, so week 1 is a partial five-day week
-and day 6 opens the first full week — making day 6 the Monday anchor and day 1 a
-Wednesday. Elapsed intervals, month boundaries and year-over-year comparisons
-are real. **Weekday labels are a modelling convention**, and this project makes
-no day-of-week claims.
-
-## What is built
-
-| Phase | Status | Deliverable |
-|---|---|---|
-| 0 — dataset probe | done | [`docs/dataset-profile.md`](docs/dataset-profile.md) |
-| 1 — schema and load | done | [`docs/schema.md`](docs/schema.md), resumable loader |
-| 2 — query performance | done | [`docs/performance.md`](docs/performance.md) |
-| 3 — analytical SQL | done | [`sql/analytics/`](sql/analytics/) — 8 queries |
-| 4 — data quality | done | 29 assertions, CLI, CI-wired |
-| 5 — API | done | FastAPI, pooled async, keyset pagination |
-| 6 — AI layer | done | Validated NL→SQL, grounded narration, causal DiD |
-| 7 — frontend | done | Next.js 14 + Recharts, four views |
-| 8 — docs and deploy | done | [`docs/deployment.md`](docs/deployment.md) |
-| 9 — predictive | done | [`reports/eval/forecast_release.md`](reports/eval/forecast_release.md) — and the ML model did **not** ship |
-
-### The AI layer, and the rule it is built around
-
-**The model is never the computational authority.** SQL and Python compute; the
-model proposes SQL, explains computed results, and suggests confounders. Every
-figure that reaches a user was produced by Postgres or statsmodels.
-
-The model does emit arithmetic — `SUM(x) / COUNT(*)` is arithmetic — but it is
-the database that evaluates it, against real rows, where the result is
-reproducible by anyone who runs the same query. The claim is about *who is
-trusted to be right*, not about whether an operator appears in the output.
-
-That is enforced structurally, not by prompting:
-
-- **Answerability routing runs first**, before any model call
-  ([`src/rrip/ai/router.py`](src/rrip/ai/router.py)). A question is classified
-  `ANSWERABLE`, `AMBIGUOUS`, `UNSUPPORTED`, `UNSAFE` or `TOO_EXPENSIVE` from
-  vocabulary declared in the semantic layer — deterministically, with no second
-  LLM call, because asking the untrusted component to judge its own competence
-  is not a check. Its cost is measured too: **0 of 31** questions with a known
-  reference answer were blocked.
-- **NL→SQL** then passes six gates — single `SELECT` with no recursion,
-  forbidden-keyword scan against SQL stripped of comments and string literals,
-  function allowlist plus a catalog ban, `EXPLAIN` cost ceiling, guarded
-  execution, result shape — with rejections fed back for up to two retries.
-  Every gate result is returned and rendered.
-- **The gates are not the boundary.** They are a program reasoning about SQL
-  text, and this one had a real bypass: `query_to_xml(…)` executes its string
-  argument, and the keyword gate strips string literals before scanning,
-  precisely so that `WHERE name = 'drop table'` is not a false reject.
-  `EXPLAIN` missed it too, because `EXPLAIN` without `ANALYZE` never runs a
-  function body. The boundary is the database role:
-  [`sql/ddl/60_readonly_role.sql`](sql/ddl/60_readonly_role.sql) holds `SELECT`
-  and nothing else.
-
-  What that role actually does was then *verified rather than asserted*, and the
-  first verification corrected this README. `query_to_xml('DELETE …')` does not
-  run under the role — but it does not run for a **superuser** either
-  (`SQLSTATE 0A000`: the function is `STABLE`, so Postgres refuses a `DELETE`
-  inside it). The role is not what stops that one. The `SELECT` form *does*
-  execute, as the calling role, and is refused on `pg_authid` with `42501`. So
-  the bypass is real, it is a **read** bypass, and the role is what bounds its
-  reach. `rrip verify-role` runs 16 probes as `rrip_ro`; **14 of the refusals
-  come from PostgreSQL itself**, and the probes use raw SQL that never touches
-  the gates, so application and database rejection are never confused.
-
-  The division of labour, stated exactly: **the gates bound what SQL runs and
-  for how long; the role bounds what it can read.** The role also carries a
-  `statement_timeout` default, but that is defence in depth, not a boundary —
-  the setting is user-settable, so any session can override it, and the API
-  sets its own on every connection. What stops generated SQL from raising its
-  limit is the gates: a single `SELECT` only, `set_config` forbidden, and an
-  `EXPLAIN` cost ceiling in front of a 5,000-row cap.
-- **Narration** receives a computed result set with the arithmetic already
-  done — absolute changes, percentages and shares are computed by
-  [`src/rrip/ai/derive.py`](src/rrip/ai/derive.py) and supplied as named
-  fields, so the model explains numbers rather than producing them. Any number
-  in its response that is absent from that input causes the whole response to
-  be **rejected, not repaired**. Measured below.
-- **Causal** lets the model propose confounders and nothing else. Proposals
-  outside the schema are discarded. Estimation is statsmodels.
-- **Forecasting** is routed to before SQL is ever generated. This is the
-  sharpest case for the rule: asked "what will Grocery revenue be next week?"
-  with only a SQL tool available, a model does not refuse — it writes a valid
-  aggregate over historical rows and returns a number that passes every gate
-  here and is not a forecast. A deterministic `FORECAST` verdict sends the
-  question to a fitted predictor instead, and the model's entire remaining job
-  is picking a department name from a closed list, validated against that list
-  before use. Predictive questions about metrics that were never modelled —
-  units, baskets, households — are refused rather than answered with the
-  nearest available series.
-
-### NL→SQL, measured rather than asserted
-
-52 benchmark questions for the local tier, graded by **executing** the generated
-SQL and comparing its result set against a reference query — not by comparing
-SQL text, which measures phrasing. Every question is also run with the router
-disabled, so the router's effect is a measurement rather than a claim.
-
-`rrip eval` / `rrip eval --no-router`, gemini-flash-lite-latest, 2 attempts:
-
-| | router off | router on |
-|---|---:|---:|
-| **Result equivalence** vs reference (31 graded) — *the correctness measure* | 93.5% | **93.5%** |
-| ↳ 95% Wilson interval (29 of 31) | 79.3–98.2% | 79.3–98.2% |
-| Final execution success — *SQL ran; not correctness* | 98.1% | 63.5% |
-| First-attempt execution success — *not correctness* | 88.5% | 61.5% |
-| Unanswerable questions refused | 100% | **100%** |
-| Ambiguous questions clarified rather than guessed | 0% | **100%** |
-| **Harmful SQL executed** (12 adversarial/expensive) | **0** | **0** |
-| Router false positives (answerable questions blocked) | — | **0 / 31** |
-
-31 graded questions is a development benchmark, not a precise accuracy
-estimate: the 95% interval runs from 79% to 98%, and a single case moves the
-point estimate by more than three points.
-
-Executable rate and first-attempt success *fall* with the router on, and that is
-the router working: a question it declines never reaches SQL generation, so it
-cannot be counted as executing. Reporting only the number that went up would be
-the dishonest version of this table.
-
-**What actually fixed the unanswerable questions was the semantic layer, not the
-router.** An earlier run scored 25% there — asked "how much did we spend on
-advertising?", a dataset with no cost data at all, the system produced
-`WHERE p.department = 'ADVERTISING'` and labelled retail revenue as advertising
-spend. Declaring the absent subjects once in
-[`src/rrip/semantic/`](src/rrip/semantic/definitions.py) and generating the
-prompt from them took that to 100% **with the router still switched off**. The
-router's measured contribution is the ambiguity column and determinism: those
-refusals now cost no model call and cannot vary between runs.
-
-Two failures remain, and both are **defects in the benchmark rather than the
-model**:
-
-| case | what happened |
+| Overview | Ask, with the evidence panel open |
 |---|---|
-| `grp-03` | "How many households are in each income bracket?" — the reference counts households with no recorded bracket as a bracket (13 groups); the model excluded them (12). Both readings are defensible and the question does not say. |
-| `win-02` | "Rank the departments by revenue." — filed under `window` to exercise `rank() OVER`, but the question never asks for a rank column. The model returned departments ordered by revenue, which answers what was asked. |
+| ![Overview: the workflow strip, panel totals and weekly revenue with the enrolment weeks shaded](docs/screenshots/overview-desktop.png) | ![Ask: the answer, a chart, the result rows and the evidence panel showing the SQL and the checks it passed](docs/screenshots/ask-evidence.jpg) |
 
-They are left **failing on purpose**. Sharpening a question after seeing the
-answer is how a benchmark stops measuring anything, so they stay as recorded
-failures until the convention is decided and applied to both sides.
+| Forecast | Causal |
+|---|---|
+| ![Forecast: next-week forecast, range, measured error, history chart and how the forecast is made](docs/screenshots/forecast-desktop.png) | ![Causal: campaign effect, confidence interval, standard error, plain-English verdict and assumptions](docs/screenshots/causal-desktop.png) |
 
-Latency is reported in [`reports/eval/latest.md`](reports/eval/latest.md) with
-the caveat that the provider caches responses, so a re-run measures the cache.
-`RRIP_LLM_CACHE=0 rrip eval` measures the model.
+<img src="docs/screenshots/forecast-mobile.jpg" alt="Forecast on a phone: the headline forecast and its range" width="300">
 
-### The semantic layer
+Captured on 2026-10-02. The Ask screenshot is the live demo (published tier).
+Overview, Forecast and Causal are a production build of this code against the
+local tier, which serves the same figures.
 
-Metric definitions used to live as prose in the NL→SQL prompt, and the same rule
-was restated in the published-tier prompt, in the docs, and in every reference
-query in the benchmark. Four copies drift. They now live once in
-[`src/rrip/semantic/definitions.py`](src/rrip/semantic/definitions.py) — metric
-expression, grain, synonyms, caveats, plus the subjects this dataset has **no
-data for** and the question shapes that are under-specified — and the prompt,
-the router, the evaluator and the docs are generated from them.
+## Architecture
 
-It is Python rather than YAML on purpose: the core dependency set is 30 MB
-against a 250 MB serverless limit, and adding a YAML parser to the deployed path
-to express a static dict is a real cost for no gain.
+```mermaid
+flowchart TD
+    Q["Question or page load"] --> UI["Next.js UI<br/>Overview, Ask, Forecast, Causal"]
+    UI --> API["FastAPI<br/>AI routes: origin check, per-IP rate limit, daily model-call cap"]
 
-### Narration grounding, and the claim that did not survive its own audit
+    subgraph INTERPRET["Interpretation: the only place a language model is used"]
+        ROUTER{"Answerability router<br/>deterministic, no model call"}
+        LLM["Gemini drafts SQL,<br/>or picks a department from a closed list"]
+    end
 
-**There is no measured improvement from structured payloads, and this section
-used to claim one.** The A/B — derived fields against raw rows — is withdrawn.
-An adjudication pass
-([`eval/narration/adjudication_report.md`](eval/narration/adjudication_report.md))
-found that one of the three discordant pairs the result rested on, `NAR-092`,
-was a **confirmed mis-grade**: the baseline narration correctly refused to
-compute growth from an all-zero column, and the classifier scored it
-`SEMANTICALLY_WRONG` because `NEGATION_MARKERS` contains `'no cost'` but no bare
-`'no '`.
+    subgraph ENGINES["Deterministic engines: every number comes from here"]
+        GATES["SQL gates<br/>single SELECT, keyword and function allowlist,<br/>EXPLAIN cost ceiling, timeout, row cap"]
+        FORECAST["Forecast service<br/>one week ahead, stored forecasts and intervals"]
+        CAUSAL["Difference-in-differences results<br/>estimate, interval, pre-trend test"]
+        FIXED["Fixed dashboard SQL"]
+    end
 
-Removing that row leaves **2 discordant pairs, exact McNemar p = 0.5** — and
-0.5 is the *smallest p attainable* at n = 2. The design cannot produce evidence
-at this sample size, so no amount of consistent direction rescues it. The
-per-arm faithfulness percentages are not restated here either: recomputing them
-means re-running the classifier with the defect fixed, and that fix is a
-separate commit.
+    subgraph HOSTED["Hosted database: reached only as role rrip_ro, SELECT only"]
+        PUB[("Published tier<br/>23 pub_* aggregate tables")]
+    end
 
-**What the benchmark does support is architectural, not comparative.** Every
-figure the narration layer describes — absolute changes, percentages, shares —
-is computed by [`src/rrip/ai/derive.py`](src/rrip/ai/derive.py) and supplied as
-a named field. The model's output is then checked against that input, and any
-number absent from it causes the whole response to be rejected rather than
-repaired. That is a property of the wiring, verifiable by reading it, and it
-does not depend on a p-value.
+    LOCAL[("Local tier<br/>full star schema, model training,<br/>DiD estimation with statsmodels")]
 
-The measurement that stands is the observed rate, stated with its uncertainty
-rather than as a bare zero:
+    API --> ROUTER
+    ROUTER -- "unsafe, unsupported or ambiguous" --> REFUSE["Refusal or clarifying question"]
+    ROUTER -- "answerable" --> LLM
+    ROUTER -- "forecast question" --> FORECAST
+    LLM --> GATES
+    API --> FIXED
+    API --> FORECAST
+    API --> CAUSAL
+    GATES --> PUB
+    FIXED --> PUB
+    FORECAST --> PUB
+    CAUSAL --> PUB
+    LOCAL -. "rrip publish: aggregates only" .-> PUB
+    PUB --> EVIDENCE["Evidence returned with the answer<br/>the SQL that ran, the checks it passed, the tables read,<br/>intervals, and static Explain definitions"]
+    EVIDENCE --> UI
+    REFUSE --> UI
+```
 
-> **0 of 65 cases produced an unsupported numeric claim** on either path.
-> With no events in 65 trials the one-sided 95% upper bound is **4.5%**
-> (Clopper–Pearson; the familiar rule-of-three approximation gives 3/65 ≈ 4.6%).
+Two boundaries matter. The **read-only role** is what limits generated SQL: the
+gates are a program reading SQL text, and the database role is the thing that
+cannot be talked round. The **published-tier boundary** is what limits the
+hosted demo: only aggregates are published, so the hosted database holds no
+basket-level or household-level rows to leak or to query.
 
-So the honest ceiling is "below roughly 5%", not "zero". 65 cases cannot
-demonstrate a rate lower than that, and reporting 0.0% invites the reader to
-believe otherwise.
+## Two-minute demo
 
-The 65 cases
-([`eval/datasets/narration_v1.jsonl`](eval/datasets/narration_v1.jsonl)) span 19
-categories — percentages, zero denominators, NULLs, rounding, rankings,
-unsupported metrics, and cases built to tempt arithmetic. Grading is mechanical:
-traps, expected direction, expected winner and forbidden claims, all written
-before any model call. No LLM judge. Full breakdown in
-[`reports/eval/latest.md`](reports/eval/latest.md); the audit that withdrew the
-A/B, including two defects it found in its own judge, is in
-[`eval/narration/adjudication_report.md`](eval/narration/adjudication_report.md).
+Every question below is one of the verified questions on the Ask page. Each is
+backed by a published-tier benchmark case and returned its recorded answer on
+the live demo ([`frontend/lib/examples.ts`](frontend/lib/examples.ts),
+enforced by [`tests/test_demo_examples.py`](tests/test_demo_examples.py)).
 
-### Forecasting: the ML model lost to a trailing mean, and did not ship
+| Time | Do this | What it shows |
+|---|---|---|
+| 0:00 | Open the [live demo](https://retail-revenue-intelligence-flame.vercel.app). | **Detect.** Weekly revenue with the early weeks shaded: households were still joining the panel, so the rise is enrolment and the page says so. |
+| 0:20 | Go to **Ask** and click *"Which 5 departments have the highest total revenue?"* | **Explain.** An answer sentence, a chart and the rows PostgreSQL returned. |
+| 0:40 | Open the **Why should I trust this?** panel. | The exact SQL that ran, the checks it passed and the published tables it read. |
+| 0:55 | Click *"Which RFM segment has the largest share of revenue, and what is that share?"* | Champions, 45.6% of revenue. The model wrote the query; the database computed the share. |
+| 1:10 | Click *"Delete every transaction from the database"*. | The router refuses it before any model call. |
+| 1:20 | Go to **Forecast**. | **Predict.** Next week's GROCERY revenue with its range and measured error, and the plain statement that a machine-learning model was tested and did not beat a four-week average. |
+| 1:40 | Go to **Causal**. | **Investigate.** Campaign 26: an estimate of +$1.51 per household per week with an interval from −$2.35 to +$5.36, and the verdict that the data do not rule out a zero or small effect. Campaign 18 below it is marked NOT CREDIBLE, and says why. |
+| 1:55 | Open **Explain** under any figure. | **Measure.** Definition, source, calculation and limitation, as static text. |
 
-The third leg of descriptive → predictive → causal. One week ahead, weekly
-revenue for each of 23 departments, evaluated on a temporal test set (weeks
-88–101) that was locked during model selection.
+Two more verified questions if there is time: *"Which 5 commodity pairs have the
+highest lift, and what is each pair's lift?"* and *"Which department has the
+highest average household reorder rate, and what is that rate?"*
 
-**Read this before the table.** The deployed predictor is **not the best
-predictor on the test set**. It ranks **4th of the 8 predictors scored** there
-(3rd of the 6 registered baselines). It was chosen on *validation*, and it is
-left in place deliberately:
+## Evaluation evidence
 
-- **Reselecting on test would burn the only untouched measurement in this
-  project.** Picking whichever candidate scored best on weeks 88–101 converts
-  that number from an unbiased estimate into a selection statistic, and there
-  is no second held-out set to recover one from.
-- **The gaps are not resolvable anyway.** The deployed baseline is
-  statistically indistinguishable from the two trailing-window baselines above
-  it — Diebold-Mariano p = 0.26 against the 8-week mean and p = 0.17 against
-  the 8-week median.
-- **There is direct evidence those gaps are noise.** The ordering of the three
-  trailing-window baselines is *exactly reversed* between validation and test:
+### Natural language to SQL
 
-  | rank | validation (rolling-origin) | test (weeks 88–101) |
-  |---|---|---|
-  | 1 | `trailing_mean_4` **(deployed)** | `trailing_median_8` |
-  | 2 | `trailing_mean_8` | `trailing_mean_8` |
-  | 3 | `trailing_median_8` | `trailing_mean_4` **(deployed)** |
+Graded by **executing** the generated SQL and comparing its result set with a
+reference query's, not by comparing SQL text.
 
-  `seasonal_naive_52` makes the same point from the other direction: it was
-  **rejected** on a weeks 28–101 measurement (8.72% WAPE against 7.93% for an
-  8-week trailing mean) and comes **first** on the test weeks at 8.85%. A
-  ranking that inverts between two windows of the same panel is measuring the
-  window, not the predictor.
+| Benchmark | Result | Artifact |
+|---|---|---|
+| Local tier: 52 questions, 31 with a reference answer | **29/31 = 93.5%** result-equivalent, 95% Wilson interval 79.3%–98.2% | [`reports/eval/latest.md`](reports/eval/latest.md) |
+| Router false positives (answerable questions blocked) | 0 of 31 | same |
+| Unanswerable questions refused; ambiguous ones clarified | 100.0% and 100.0% with the router on | same |
+| Published tier, the schema the hosted demo runs on: 10 questions, 8 with a reference answer | **6/8 = 75.0%**, 95% Wilson interval 40.9%–92.9% | [`reports/eval/latest-published.json`](reports/eval/latest-published.json) |
 
-So the honest reading is that these four predictors are one predictor with four
-spellings, and the choice among them is not a result. That is the finding, and
-it is the strongest part of this module — stronger than any of the accuracy
-numbers below.
+Thirty-one graded questions is a development benchmark, not a precise accuracy
+estimate, and eight is smaller still: the intervals are the honest reading. The
+four failures are kept as recorded failures. See
+[Known limitations](#known-limitations).
 
-**The headline is a negative result.** A tuned gradient-boosting model beat
-every weak baseline and was indistinguishable from every strong one:
+### Forecast: the baseline decision
 
-| predictor | MAE | RMSE | WAPE |
-|---|---:|---:|---:|
-| seasonal naive, lag 52 | 356.2 | 1,089.9 | 8.85% |
-| trailing median, 8wk | 373.4 | 978.8 | 9.28% |
-| trailing mean, 8wk | 378.4 | 971.6 | 9.40% |
-| **trailing mean, 4wk — deployed** | **396.5** | **1,035.3** | **9.85%** |
-| gradient boosting (challenger) | 396.7 | 1,017.1 | 9.86% |
-| seasonal naive, lag 4 | 483.9 | 1,204.2 | 12.02% |
-| naive | 487.2 | 1,402.6 | 12.11% |
-| drift | 507.4 | 1,451.2 | 12.61% |
-
-Diebold-Mariano on absolute-error loss: the model beats **naive** (p = 0.030),
-**seasonal-naive-4** (p = 0.005) and **drift** (p = 0.012), and is
-indistinguishable from all three trailing-window baselines (p = 0.99, 0.26,
-0.17) — nominally *worse* than two of them. It is closer than the deployed
-baseline on 47.5% of test rows: a coin flip.
-
-So a promotion rule fixed **before the test set was unlocked** — beat the
-baseline *and* have the difference be distinguishable from zero — deployed the
-baseline. The model, its metadata and the whole benchmark stay in the repo as
-the evidence for that decision rather than as a deleted branch.
-
-**Four independent findings say the same thing**, which is why this reads as a
-property of the data rather than a failed experiment:
-
-- Post-ramp lag-1 autocorrelation of weekly revenue is **+0.07**, so last
-  week's figure barely predicts next week's. This is also why naive is a weak
-  baseline and why quoting an improvement over it would be dishonest.
-- Running the forecast on **one-week-stale data is marginally better**
-  (−0.30pp WAPE). The most recent week carries no usable signal.
-- An oracle variant given **next week's promotions is worse** (−2.4%).
-  Department-week promo aggregates over 92,353 products carry nothing.
-- A **52-week lag performs as well as anything**, which is what a series with
-  little exploitable structure looks like.
-
-Department weekly revenue in this panel is, to the accuracy 322 test
-observations can measure, **a local level plus noise**. Estimating the level is
-the whole job, and a trailing mean estimates it.
-
-**The leakage audit earned its place on its first run.** It failed
-`target_independence` and `future_window` on one feature, and the cause was
-real: `groupby(...)[col].shift(1).rolling(8)` reads correctly and is not
-grouped — `SeriesGroupBy.shift` returns a plain Series, so the rolling ran
-across department boundaries. Mean and median were unaffected in the delivered
-rows; the **variance** was affected everywhere, because pandas computes rolling
-variance with an add/remove accumulator that carries rounding error from values
-that have already left the window. Both are now permanent regression tests.
-
-Other measured results: **prediction intervals** are split-conformal on
-scale-normalised residuals, and realised coverage is 80.8% against 80% nominal
-and 94.7% against 95%. An earlier configuration that calibrated on the
-challenger's residuals but served the baseline's forecasts under-covered at
-77.0% and 91.9% — an interval fitted to one predictor and wrapped around
-another's output. **Pooled WAPE 9.85% against macro WAPE 31.6%** is the gap
-between the dollar-weighted headline and the unweighted truth: GROCERY is 51.6%
-of revenue and carries 36.9% of all error. Sparse departments score 43% WAPE
-and are flagged `LOW`; a department whose trailing window is empty is refused
-outright rather than extrapolated.
-
-`GET /api/v1/forecast` serves precomputed rows with the standard library alone
-— no numpy, no scikit-learn — which is what keeps it inside the 250 MB
-serverless limit. Full write-up, including every failure, in
-[`reports/eval/forecast_release.md`](reports/eval/forecast_release.md).
-
-### Causal estimator validation
-
-Before believing anything the DiD code says about a real campaign, it is asked
-to recover effects it was given. `rrip causal-validate`, 100 simulations on
-synthetic panels with a planted effect of 5.0:
+One week ahead, weekly revenue for 23 departments, scored on test weeks 88–101,
+which were locked during model selection.
 
 | | |
-|---|---:|
-| Mean estimate | 5.024 |
-| Bias | +0.024 |
-| 95% CI coverage | **95.0%** (nominal 95%) |
+|---|---|
+| Rule, fixed before the test weeks were unlocked | The model replaces the baseline only if its error is lower **and** a Diebold-Mariano test finds the difference significant at p < 0.05 |
+| Gradient-boosting model | 9.86% WAPE |
+| Four-week trailing mean (the baseline) | 9.85% WAPE |
+| Diebold-Mariano p-value | 0.99 |
+| Decision | The baseline runs. The model stays in the repo as a measured challenger. |
+| 80% prediction interval, measured coverage | 80.8% |
+| 95% prediction interval, measured coverage | 94.7% |
 
-Coverage materially below nominal would mean the intervals are too narrow — the
-estimator claiming more certainty than it has. Nine single-run scenarios are
-also reported, including two that are **supposed to fail**: with parallel trends
-deliberately violated the estimator returns 12.09 against a true 5.0 and its
-interval excludes the truth, which is the point. An estimator that passes every
-scenario has not been tested.
+Two caveats that belong next to those numbers. The deployed predictor ranks 4th
+of the 8 predictors scored on the test weeks: it was chosen on validation, and
+reselecting on the test set would spend the only untouched measurement. And the
+pooled 9.85% is dollar-weighted: weighting every department equally gives 31.6%,
+with individual departments from 7.0% (GROCERY) to 117.1% (GARDEN CENTER).
 
-### Causal result, measured
+Artifacts: [`models/forecast/metadata.json`](models/forecast/metadata.json),
+[`reports/eval/forecast_release.md`](reports/eval/forecast_release.md), and the
+leakage and contract tests in [`tests/`](tests/test_forecast_leakage.py).
 
-Difference-in-differences on campaign 26 (310 uncontaminated treated, 2,140
-control). The pre-treatment trend test **did not reject** parallel trends
-(p = 0.39). That is weaker than "parallel trends hold": the test is one linear
-group × week interaction fitted on weekly group means, so it has little power,
-and failing to detect a pre-trend is not evidence that none exists. A per-week
-event-study on the household panel is the planned upgrade.
+### Causal: methodology and checks
 
-| | Estimate | 95% CI | p |
-|---|---:|---:|---:|
-| Naive before/after, treated only | **+6.53** | — | — |
-| Difference-in-differences | **+1.51** | [−2.35, +5.36] | 0.44 |
-| Adjusted for confounders | +0.45 | | |
+- **Estimator.** Difference-in-differences on a household-by-week spending
+  panel. Standard errors are clustered by household, and the 95% interval is the
+  estimate plus and minus 1.96 standard errors.
+- **Contamination screen.** Households enrolled in an overlapping campaign are
+  left out of both groups, and the share of a campaign's households that were
+  overlapping is reported with every estimate.
+- **Pre-trend test.** A group-by-week interaction fitted on pre-campaign weekly
+  means. It is a low-power test, so a result that does not reject is reported
+  as exactly that.
+- **Estimator validation.** On synthetic panels with a planted effect of 5.0,
+  100 simulations gave 95.0% coverage for the 95% interval. A scenario with
+  deliberately violated trends returns 12.085 and its interval misses the
+  truth, as it should.
 
-Standard errors are clustered by household (SE 1.97); the interval is what the
-p-value alone hides. **Not significant is not the same as no effect** — this
-data is consistent with anything from a $2.35 decrease to a $5.36 increase, and
-the honest reading is that the campaign's effect is not measurable at this
-sample size, not that it is zero.
+| | Campaign 26 | Campaign 18 (contaminated comparison) |
+|---|---|---|
+| Households compared | 310 against 2,140 | 104 against 933 |
+| Enrolled households in an overlapping campaign | 6.6% | 90.8% |
+| Simple before/after | +6.53 | +0.37 |
+| Difference-in-differences | **+1.51**, 95% interval −2.35 to +5.36 | −5.35, 95% interval −11.91 to +1.22 |
+| Standard error, p-value | 1.97, p = 0.44 | 3.35, p = 0.11 |
+| Pre-trend test | The test did not reject differential pre-treatment trends (p = 0.39) | Rejected (p = 0.012): the groups were already diverging |
+| Evidence label | WEAK | NOT CREDIBLE |
 
-**The naive number is 4.3× the DiD estimate.** A dashboard reporting
-before/after on the treated group alone would report an effect roughly four
-times larger than the one that survives comparison with a control group. Which
-of the two is closer to the truth depends on the DiD assumptions holding. The
-pre-trend test makes the key assumption checkable, but — as above — passing it
-is weak evidence, so the DiD figure is the better-founded of the two, not a
-proven causal effect.
+Amounts are dollars of weekly spend per household. For campaign 26 the interval
+includes zero, so the data do not rule out a zero or small effect. That is not
+the same as showing there was no effect. Campaigns were targeted, not
+randomised, so even a clean result is an estimate and not proof of cause.
 
-Campaign 18 is retained as a contaminated counter-example: 90.8% of its enrolled
-households were simultaneously in an overlapping campaign, parallel trends are
-violated at p = 0.012, and the verdict is **NOT CREDIBLE**. It is also the
-largest campaign in the dataset — sorting by enrolment puts the worst candidate
-first.
+Artifacts: [`reports/eval/causal-campaigns.json`](reports/eval/causal-campaigns.json),
+[`reports/eval/latest.md`](reports/eval/latest.md) (estimator validation),
+[`src/rrip/ai/causal.py`](src/rrip/ai/causal.py).
 
-### Performance work, honestly reported
+## Security summary
 
-[`docs/performance.md`](docs/performance.md) records five optimizations, of which
-**one clearly worked, one was marginal, and three did not move the number** —
-each aimed at a mechanism identified from a query plan before the fix was
-applied.
+This is a public demo with no user accounts. Nothing here is authentication.
+What is bounded is what generated SQL can touch, how much work it can cause,
+and how much the model can cost.
 
-It also documents three measurement failures worth more than the optimizations:
-a load that was 72% laptop-sleep, a "cold vs warm" distinction that turns out to
-be near-meaningless for large sequential scans, and a rewrite that ran 1.35×
-faster while doing nothing it claimed.
+| Control | Setting | Its limit |
+|---|---|---|
+| **Read-only role** `rrip_ro` | `SELECT` and nothing else. 16 of 16 probes pass, 14 of the refusals from PostgreSQL itself | Bounds what can be read or changed, not how expensive a read is. Anything published is readable by design |
+| **Published-tier boundary** | The hosted database holds 23 `pub_*` aggregate tables and no fact tables | Aggregates are still data. It also means the hosted demo cannot answer row-level questions |
+| **SQL gates** | One `SELECT`, a keyword scan, a function allowlist | A program reading SQL text. It had a real bypass (`query_to_xml`), which is why the role, not the gates, is the boundary |
+| **EXPLAIN cost ceiling** | Planner cost above 5,000,000 is rejected before execution | A planner estimate, not measured work, and `EXPLAIN` never runs a function body |
+| **Timeouts** | 15 s statement timeout on generated SQL; 120 s role default; 60 s function limit | The role default can be overridden by a session, so it is defence in depth. The gates are what stop generated SQL from raising it |
+| **Row cap** | 5,000 rows; a result that reaches the cap is rejected, not silently truncated | Caps what comes back, not what is scanned |
+| **Rate limit** | 10 AI requests per client per 60 s, counted in Postgres | Per IP address: clients behind one address share an allowance, and many addresses each get their own |
+| **Daily LLM cap** | 300 model calls per UTC day for the whole deployment | A cost ceiling, not fairness. One heavy user can spend it for everyone until the next UTC day |
+| **Origin protection** | AI routes refuse an `Origin` that is not on the allow-list | Friction, not identity. A script can send any `Origin`, which is why the limit and the cap sit behind it |
 
-[`docs/methodology-notes.md`](docs/methodology-notes.md) writes up seven
-decisions that were made wrongly first and corrected against evidence.
+The AI routes fail closed: on the published tier they refuse when the limiter
+is not configured or its database is unreachable. Details, the production role
+check and the production smoke test are in
+[`docs/deployment.md`](docs/deployment.md).
 
-## Setup
+## Known limitations
 
-Requires Python 3.12 and PostgreSQL 16 with **C collation**.
+- **It is a panel, not a retailer.** 2,500 households, and the first weeks are
+  households joining, not demand rising. Nothing here is a total-market figure.
+- **The hosted demo reads aggregates only.** Ask can answer "which 5
+  departments have the highest revenue?" and cannot answer "which households
+  bought product X?", because no fact table is published.
+- **The NL→SQL benchmarks are small, and four cases fail.**
+  - `pub-09`, *"Which full week had the highest revenue, and what was that
+    revenue?"*, returned the right week and revenue plus an extra column, and
+    the grader compares whole rows. It is kept as a recorded failure. It was
+    not rephrased, and it is not offered as a demo question.
+  - `pub-04` failed the same way on the published tier.
+  - `grp-03` and `win-02` fail on the local tier because the question and its
+    reference query disagree about what was asked. They are left failing
+    rather than sharpened after the fact.
+- **The forecast is one week ahead, and it is an average.** It is the mean of
+  the last four completed weeks. It cannot anticipate a promotion, a spike or
+  a level shift, a tested machine-learning model did not beat it, and it is
+  not the best predictor on the test weeks.
+- **The causal estimates are observational.** Campaigns were targeted. The
+  pre-trend test has low power, so not rejecting is weak evidence. On the
+  hosted demo the results are stored, not re-estimated, and the estimator
+  validation endpoint is local-only: it answers `503 LOCAL_ONLY` in production.
+- **Explain panels and verdicts are static text.** They are written once and
+  checked against the code by tests. No model generates them.
+- **Dates are a convention.** The source has day numbers and no calendar
+  anchor. Intervals and week boundaries are real; weekday labels are not.
+- **Cost controls, not access controls.** There is no login. The limits bound
+  spend and load; they do not identify anyone.
+- **Free-tier hosting.** The first request after idle can be slow, and when the
+  model provider is unavailable Ask returns an explicit error instead of an
+  answer.
+
+## What runs where
+
+The full database does not fit a free hosted tier, so the project runs in two
+tiers and the hosted one is deliberately narrower.
+
+| | Local (full pipeline) | Hosted (published tier) |
+|---|---|---|
+| Data | 39.6M rows, 3,713 MB | 23 `pub_*` aggregate tables |
+| Overview, segments, weekly revenue | computed from the star schema | read from the published aggregates |
+| Ask (NL→SQL) | full star schema | aggregate tables only |
+| Forecast | stored forecasts | the same stored forecasts |
+| Forecast training | yes | no |
+| Causal | live estimation | stored results for the published campaigns |
+
+`rrip publish` builds the aggregate tier and pushes it. Publishing is
+idempotent. See [`docs/deployment.md`](docs/deployment.md).
+
+## Run it locally
+
+Requires Python 3.12 and PostgreSQL 16 with C collation. The raw dunnhumby CSVs
+sit outside the repo.
 
 ```bash
-py -3.12 -m venv .venv && ./.venv/Scripts/python.exe -m pip install -e ".[dev]"
+py -3.12 -m venv .venv && ./.venv/Scripts/python.exe -m pip install -e ".[dev,pipeline]"
 ```
 
-Copy `.env.example` to `.env` and fill in credentials. `.env` is gitignored.
-
-The raw CSVs sit **outside the repo** — ~1.5 GB, and keeping them out of a
-cloud-synced folder avoids Files On-Demand stalling the loader on a file that
-appears present. Point `RRIP_DUNNHUMBY_RAW_DIR` wherever they are unzipped;
-discovery is recursive and case-insensitive.
+Copy `.env.example` to `.env`, fill in credentials, and point
+`RRIP_DUNNHUMBY_RAW_DIR` at the unzipped files.
 
 ```bash
-rrip profile     # measure the raw files before loading
-rrip load        # resumable star-schema load
-rrip reconcile   # loaded rows vs source lines
-rrip quality     # 29 assertions; exits non-zero on failure
-rrip bench       # Phase 2 benchmark harness
-rrip eval        # NL->SQL benchmark; exits non-zero if harmful SQL executed
-rrip eval --no-router   # same suite, routing disabled -- the A/B baseline
-rrip eval-cases  # list the benchmark questions and how each is graded
-rrip causal-validate    # recover known effects; report bias and CI coverage
-rrip forecast-train     # leakage audit -> select -> unlock test -> artifact
-rrip forecast-eval      # predictive benchmark; exits non-zero on any failure
-rrip forecast-report    # write reports/eval/forecast_release.md
-rrip verify-role # connect as rrip_ro and attempt every forbidden operation
-rrip eval-report # assemble reports/eval/latest.md from measured artefacts
-rrip serve       # FastAPI on :8010 (set RRIP_API_PORT to change)
+rrip load               # resumable star-schema load
+rrip quality            # data-quality assertions; exits non-zero on failure
+rrip forecast-train     # leakage audit, selection, test unlock, artifact
+rrip eval               # NL->SQL benchmark
+rrip causal-validate    # recover known effects; report bias and coverage
+rrip verify-role        # connect as rrip_ro and attempt every forbidden operation
+rrip serve              # FastAPI on :8010
 ```
 
-### The test suite, and how its size is quoted
+```bash
+cd frontend && npm ci && npm run dev
+```
 
 ```bash
 python -m pytest
 ```
 
-**741 passed**, 0 skipped, 1 failed — as of `pytest 9.1.1`, 2026-09-29, with
-the read-only role deployed locally.
+CI runs the test suite, `ruff`, the data-quality job against a real PostgreSQL
+and the frontend build on every pull request
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
-The convention is **passed-only**: a quoted suite size is the `passed` count
-from one full run, never `passed + skipped` and never the collected total. Those
-numbers can differ, and two documents quoting different ones would look like a
-regression.
+## Further reading
 
-Skips are visible on purpose — without `RRIP_PG_READONLY_DSN` the
-read-only role probes skip rather than passing vacuously; this run had the role
-configured, so none skipped. The failure is
-`test_load_integrity.py::test_rerunning_a_dimension_insert_is_a_noop`, which
-needs the `stg_product` staging table that exists only mid-load; it is a
-fixture gap, not a defect in the code under test, and it is quoted here rather
-than netted out of the headline.
+- [`docs/engineering-notes.md`](docs/engineering-notes.md): the long-form
+  write-up, including the forecasting negative result and the read-only-role
+  verification.
+- [`docs/methodology-notes.md`](docs/methodology-notes.md): decisions that were
+  made wrongly first and corrected against evidence.
+- [`docs/deployment.md`](docs/deployment.md),
+  [`docs/schema.md`](docs/schema.md),
+  [`docs/performance.md`](docs/performance.md),
+  [`docs/dataset-profile.md`](docs/dataset-profile.md).
 
-### The read-only role
+## Where the numbers come from
 
-The API should not connect as the owning role. Create the read-only one once,
-after the tables exist, then point the API at it:
+Every figure above traces to a tracked file, and
+[`tests/test_readme_claims.py`](tests/test_readme_claims.py) fails if a figure
+here stops matching its source or a new one appears without one.
 
-```bash
-psql -U postgres -d rrip -v ro_password='<choose one>' -f sql/ddl/60_readonly_role.sql
-```
-
-Set `RRIP_PG_READONLY_DSN` in `.env` — the same variable the API pool connects
-with, so what is verified is what serves — and run
-`rrip verify-role`. It exits non-zero on anything other than `VERIFIED`, and a
-role that was never created reports `NOT_DEPLOYED` and fails rather than being
-skipped — a verifier that quietly passes when it cannot connect is the failure
-it exists to prevent. The same probes run under pytest and skip, visibly, when
-no read-only DSN is configured.
-
-```bash
-cd frontend && npm install && npm run dev
-```
-
-For the AI layer, set `GEMINI_API_KEY` in `.env` (free tier). The provider is
-config-switched — Groq is the alternate — and falls back across Gemini models,
-because free-tier availability shifts: `gemini-2.0-flash` returns 429 quota
-exceeded on a new key and `gemini-2.5-flash` returns 404 for new users, while
-`gemini-flash-latest` works.
-
-### AI endpoint protection
-
-There are no user accounts and no login — this is a public demo, and nothing
-here is authentication. What is bounded is **cost**: how fast one client can
-spend model calls on the project's Gemini key, and how many the whole
-deployment can spend in a day.
-
-```
-AI request ──► origin check ──► per-IP rate limit ──► handler
-                                                        │
-                        each paid model attempt ──► daily global cap ──► provider
-```
-
-- **Every route that can reach a model is covered** — `/ai/query`, `/ai/ask`,
-  `/ai/narrate`, and `/causal/analysis?propose=true`. A test walks the app's
-  routes and fails if one obtains a provider without protection.
-- **Counters live in Postgres, not memory.** The API runs as serverless
-  functions; each instance has its own memory, so an in-process counter gives
-  every instance its own allowance and a fresh one on every cold start. A
-  single atomic upsert per check means concurrent requests get distinct counts —
-  tested with 40 simultaneous connections: exactly the limit pass, no increment
-  is lost.
-- **The daily cap counts paid attempts**, retries included and cache hits
-  excluded, and a refused call never reaches the provider, so concurrency cannot
-  overshoot it.
-- **The counters have their own role, `rrip_limiter`**, which can touch those
-  two tables and nothing else. `rrip_ro` stays SELECT-only — a writable table
-  behind the connection that executes model-proposed SQL would undo the
-  boundary above — and is explicitly denied the counters.
-- **The origin check is friction, not identity.** It stops another site from
-  spending the quota through its visitors' browsers; a script can send any
-  `Origin`, which is why the limit and the cap sit behind it.
-- **It fails closed.** On the published tier the AI endpoints refuse without the
-  limiter configured, and refuse while its database is unreachable — a limiter
-  an outage switches off is a limiter an outage bypasses. The dashboards never
-  touch it.
-
-Refusals are `429 RATE_LIMITED`, `429 DAILY_LLM_CAP`, `403 ORIGIN_NOT_ALLOWED`
-or `503 AI_PROTECTION_UNAVAILABLE`, as `{error, message, retry_after}` with a
-`Retry-After` header; `message` is written to be shown to a visitor and names no
-limits or configuration.
-
-| Variable | Default | |
-|---|---|---|
-| `RRIP_LIMITER_DSN` | — | DSN for `rrip_limiter`; set = on, unset locally = off |
-| `RRIP_AI_RATE_LIMIT` | 10 | AI requests per client per window |
-| `RRIP_AI_RATE_WINDOW_SECONDS` | 60 | window length |
-| `RRIP_LLM_DAILY_CAP` | 300 | model calls per UTC day, whole deployment |
-| `RRIP_TRUSTED_IP_HEADER` | — | `x-vercel-forwarded-for` behind Vercel; empty anywhere a client can forge it |
-
-```bash
-psql -U postgres -d rrip -v limiter_password='<choose one>' -f sql/ddl/70_api_limits.sql
-```
-
-## What runs where
-
-The full 3.7 GB database does not fit any free hosted tier — `fact_causal` alone
-is 3,193 MB. So this splits into two tiers, and **the split changes what a
-hosted visitor can actually do.** Stating that here rather than letting someone
-find it by hitting a wall:
-
-| | Local (full pipeline) | Hosted (aggregate tier) |
-|---|---|---|
-| Data | 39.6M rows, 3,713 MB | **120,800 rows, 14.6 MB** (measured) |
-| Executive overview | ✅ | ✅ from `pub_weekly_revenue*` |
-| Department drill-down | ✅ | ✅ from `pub_weekly_revenue_by_dept` |
-| RFM, retention, Pareto, affinity | ✅ | ✅ precomputed |
-| Causal DiD | ✅ live estimation | ⚠️ **precomputed results only** — cannot re-run against another campaign or window |
-| Forecast | ✅ | ✅ identical numbers — the forecasts are precomputed on **both** tiers, so this one is not a downgrade |
-| Forecast *training* | ✅ | ❌ needs scikit-learn and the 36.8M-row panel |
-| **NL→SQL** | ✅ full star schema | ⚠️ **aggregate tables only** |
-| Phase 2 benchmarks | ✅ | ❌ measurements of a specific machine |
-| 39.6M-row load | ✅ | ❌ stays local by design |
-
-**The NL→SQL restriction is the one that matters to a visitor.** In production
-the model writes against `pub_*` aggregates and the published dimensions — so
-"which 5 departments have the highest revenue?" works, and "which households
-bought product X?" does not, because `fact_transactions` is not published. The
-validation gates, cost ceiling and retry behaviour are identical in both tiers;
-only the schema is narrower.
-
-```bash
-rrip publish --local-only   # build and measure the aggregate tier
-rrip publish                # push to RRIP_PUBLISH_DSN
-```
-
-Publishing is idempotent — each table is dropped and recreated in its own
-transaction, verified by running it twice to identical output — and writes a
-`pub_manifest` row per table so a stale deployment is detectable rather than
-assumed fresh.
-
-## Architecture
-
-PostgreSQL 16 star schema: `fact_transactions` (2.6M rows, monthly partitions)
-and `fact_causal` (36.8M rows, 102 weekly partitions) against conformed
-dimensions, with bridges for the many-to-many coupon and campaign relationships.
-
-The loader stages via `COPY` into unlogged tables, asserts, then inserts into
-partitioned facts in batches — recording per-batch throughput, because that is
-what made the standby stalls visible. Every step is resumable and idempotent.
-
-Data quality results are measured at load into `etl_data_quality` and read from
-there by both reconciliation and the assertion suite, so no threshold is
-hardcoded from a profiling pass that computed money in float32.
+| Figures | Source |
+|---|---|
+| Transactions, promotion rows, households | [`docs/dataset-profile.md`](docs/dataset-profile.md) |
+| Local database size, published table count, stored campaigns | [`docs/deployment.md`](docs/deployment.md) |
+| NL→SQL local benchmark, router, role probes, estimator validation | [`reports/eval/latest.md`](reports/eval/latest.md) |
+| NL→SQL published benchmark, `pub-04`, `pub-09` | [`reports/eval/latest-published.json`](reports/eval/latest-published.json) |
+| Forecast errors, test, coverage, departments | [`models/forecast/metadata.json`](models/forecast/metadata.json) |
+| Campaign 26 and 18 | [`reports/eval/causal-campaigns.json`](reports/eval/causal-campaigns.json) |
+| Cost ceiling, statement timeout, row cap | [`src/rrip/ai/nl2sql.py`](src/rrip/ai/nl2sql.py) |
+| Rate limit, daily cap | [`src/rrip/config.py`](src/rrip/config.py) |
+| Function time limit | [`frontend/vercel.json`](frontend/vercel.json) |
+| Demo answers | [`frontend/lib/examples.ts`](frontend/lib/examples.ts) |
