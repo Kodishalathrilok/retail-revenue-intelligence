@@ -15,7 +15,9 @@
  * tests/test_parallel_trends_wording.py): a pre-trend test that passes is
  * "not rejected", never a finding that the trends are parallel, and an
  * interval that includes zero is never reported as the absence of an effect.
- * The verdict and assumption text is deterministic; no model writes it.
+ * The verdict and assumption text is deterministic; no model writes it. The
+ * API's stored pre-trend verdict string is not rendered anywhere: the page's
+ * own pretrendSentence is the single wording.
  */
 
 import { useEffect, useId, useState, type ReactNode } from 'react';
@@ -33,7 +35,7 @@ import {
 import { Workflow } from '@/components/workflow';
 import { fmtNum, get } from '@/lib/api';
 import {
-  campaignVerdict, effectSummary, pretrendSentence, signedMoney,
+  campaignVerdict, displayWarning, effectSummary, pretrendSentence, signedMoney,
 } from '@/lib/overview.mjs';
 
 type Analysis = {
@@ -43,7 +45,7 @@ type Analysis = {
   adjusted_stderr: number | null; confounders_used: string[];
   parallel_trends: {
     passed: boolean; treated_slope: number; control_slope: number;
-    interaction_pvalue: number; pre_weeks: number; verdict: string;
+    interaction_pvalue: number; pre_weeks: number;
   };
   pre_period_series: {
     treated: { week_no: number; mean_spend: number }[];
@@ -157,7 +159,7 @@ function AnalysisPanel({ a, title, intro, lead = false }: {
       </Callout>
 
       <Explain metrics={['campaign_effect', 'campaign_interval', 'campaign_stderr', 'pretrend_test']}
-               notes={{ campaign_effect: a.warnings, pretrend_test: [pt.verdict] }} />
+               notes={{ campaign_effect: a.warnings.map(displayWarning) }} />
 
       <div>
         <h3 className="text-sm font-semibold text-ink">How the estimate compares</h3>
@@ -189,7 +191,7 @@ function AnalysisPanel({ a, title, intro, lead = false }: {
       {a.warnings.length > 0 && (
         <Callout tone="caution" title="Reported by the analysis">
           <ul className="list-disc space-y-1.5 pl-4">
-            {a.warnings.map((w) => <li key={w}>{w}</li>)}
+            {a.warnings.map((w) => <li key={w}>{displayWarning(w)}</li>)}
           </ul>
         </Callout>
       )}

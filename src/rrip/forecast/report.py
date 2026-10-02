@@ -107,9 +107,14 @@ def _ranking_caveat(m: dict) -> list[str]:
     test_family = [k for k in names if k.startswith("trailing_")]
     flipped = family == list(reversed(test_family))
 
+    # Every recorded Diebold-Mariano test is the MODEL against a baseline. This
+    # bullet used to quote two of those p-values as if they compared the
+    # deployed baseline with the baselines ranked above it; no such test was
+    # run. Each figure now carries the comparison it belongs to.
     dm = metrics.get("diebold_mariano_pairwise") or {}
     p8 = dm.get("model_vs_trailing_mean_8", {}).get("p_value")
     pmed = dm.get("model_vs_trailing_median_8", {}).get("p_value")
+    pdep = dm.get(f"model_vs_{deployed}", {}).get("p_value")
 
     out = [
         "### Read this before the tables",
@@ -127,11 +132,17 @@ def _ranking_caveat(m: dict) -> list[str]:
         "statistic, and there is no second held-out set to recover one from.",
     ]
 
-    if p8 is not None and pmed is not None:
+    if p8 is not None and pmed is not None and pdep is not None:
         out.append(
-            f"- **The gaps are not resolvable anyway.** Diebold-Mariano gives "
-            f"p = {p8} against `trailing_mean_8` and p = {pmed} against "
-            "`trailing_median_8`.")
+            "- **The gaps are not resolvable anyway.** The Diebold-Mariano "
+            "tests in this report compare the challenger model with each "
+            "baseline; none compares one baseline with another. The model "
+            f"cannot be told apart from the deployed baseline (model vs "
+            f"{deployed.replace('_', ' ')}, p = {pdep}), and it cannot be told "
+            "apart from the two baselines ranked above it either (model vs "
+            f"trailing mean 8, p = {p8}; model vs trailing median 8, "
+            f"p = {pmed}). That is indirect evidence that the three are not "
+            "separable on this test set, not a direct test of it.")
 
     if flipped and family:
         out += [
@@ -564,8 +575,10 @@ def _test_section(m: dict) -> list[str]:
         "### Is the difference real?",
         "",
         "Diebold-Mariano on absolute-error loss, with the Harvey-Leybourne-"
-        "Newbold small-sample correction. Negative mean loss differential "
-        "means the challenger has lower error.",
+        "Newbold small-sample correction. Every row tests the challenger "
+        "model against one baseline; no row tests one baseline against "
+        "another. Negative mean loss differential means the challenger has "
+        "lower error.",
         "",
         "| comparison | mean loss diff | p |",
         "|---|---:|---:|",
@@ -618,7 +631,8 @@ def _decision_section(m: dict) -> list[str]:
         f"| Challenger test WAPE | {_pct(dep.get('model_scores', {}).get('wape'))} |",
         f"| Baseline | `{dep.get('baseline')}` |",
         f"| Baseline test WAPE | {_pct(dep.get('baseline_scores', {}).get('wape'))} |",
-        f"| Diebold-Mariano p | {dep.get('diebold_mariano', {}).get('p_value')} |",
+        f"| Diebold-Mariano p (model vs {str(dep.get('baseline')).replace('_', ' ')}) | "
+        f"{dep.get('diebold_mariano', {}).get('p_value')} |",
         f"| **Deployed** | **`{dep.get('deployed_predictor')}`** "
         f"({dep.get('deployed_kind')}) |",
         "",
@@ -1105,7 +1119,8 @@ def build() -> str:
         f"{_pct(dep.get('model_scores', {}).get('wape'))} WAPE against "
         f"{_pct(dep.get('baseline_scores', {}).get('wape'))} for the baseline, "
         f"a difference with Diebold-Mariano p = "
-        f"{dep.get('diebold_mariano', {}).get('p_value')}. It does "
+        f"{dep.get('diebold_mariano', {}).get('p_value')} (model vs "
+        f"{str(dep.get('baseline')).replace('_', ' ')}). It does "
         "significantly beat naive, seasonal-naive and drift; it does not beat "
         "any trailing-window baseline.",
         "",

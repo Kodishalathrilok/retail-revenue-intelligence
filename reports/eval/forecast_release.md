@@ -1,6 +1,6 @@
 # Forecast release report
 
-_Generated 2026-09-29T13:56:17+00:00 from `models/forecast/metadata.json` and `reports/eval/forecast-latest.json`. Every figure is read from a measured artefact; nothing here is written by hand._
+_Generated 2026-10-02T06:12:11+00:00 from `models/forecast/metadata.json` and `reports/eval/forecast-latest.json`. Every figure is read from a measured artefact; nothing here is written by hand._
 
 ---
 
@@ -8,7 +8,7 @@ _Generated 2026-09-29T13:56:17+00:00 from `models/forecast/metadata.json` and `r
 
 One-week-ahead forecasting of **weekly revenue by department** over the dunnhumby Complete Journey panel, 23 departments, evaluated on an untouched temporal test set of 14 weeks.
 
-**The tested machine-learning models did not beat a simple trailing mean, so the system deploys the trailing mean.** The gradient-boosting challenger reached 9.86% WAPE against 9.85% for the baseline, a difference with Diebold-Mariano p = 0.99227. It does significantly beat naive, seasonal-naive and drift; it does not beat any trailing-window baseline.
+**The tested machine-learning models did not beat a simple trailing mean, so the system deploys the trailing mean.** The gradient-boosting challenger reached 9.86% WAPE against 9.85% for the baseline, a difference with Diebold-Mariano p = 0.99227 (model vs trailing mean 4). It does significantly beat naive, seasonal-naive and drift; it does not beat any trailing-window baseline.
 
 That is a valid outcome and it is what this report documents. The predictive component earns its place by being measurable, refusable and honest about its own limits -- not by containing a model.
 
@@ -17,7 +17,7 @@ That is a valid outcome and it is what this report documents. The predictive com
 **The deployed predictor is not the best predictor on the test set.** `trailing_mean_4` ranks **4 of the 8 predictors scored** on weeks 88-101 (3 of the 6 registered baselines). It was chosen on validation, and it stays in place deliberately:
 
 - **Reselecting on test would burn the only untouched measurement in this project.** Adopting whichever candidate scored best on the test weeks converts that number from an unbiased estimate into a selection statistic, and there is no second held-out set to recover one from.
-- **The gaps are not resolvable anyway.** Diebold-Mariano gives p = 0.25873 against `trailing_mean_8` and p = 0.16945 against `trailing_median_8`.
+- **The gaps are not resolvable anyway.** The Diebold-Mariano tests in this report compare the challenger model with each baseline; none compares one baseline with another. The model cannot be told apart from the deployed baseline (model vs trailing mean 4, p = 0.99227), and it cannot be told apart from the two baselines ranked above it either (model vs trailing mean 8, p = 0.25873; model vs trailing median 8, p = 0.16945). That is indirect evidence that the three are not separable on this test set, not a direct test of it.
 - **There is direct evidence those gaps are noise.** The ordering of the trailing-window baselines is *exactly reversed* between validation and test:
 
   | rank | validation (rolling-origin) | test |
@@ -274,7 +274,7 @@ Weeks **88-101**, 322 observations across 23 departments. Untouched during model
 
 ### Is the difference real?
 
-Diebold-Mariano on absolute-error loss, with the Harvey-Leybourne-Newbold small-sample correction. Negative mean loss differential means the challenger has lower error.
+Diebold-Mariano on absolute-error loss, with the Harvey-Leybourne-Newbold small-sample correction. Every row tests the challenger model against one baseline; no row tests one baseline against another. Negative mean loss differential means the challenger has lower error.
 
 | comparison | mean loss diff | p |
 |---|---:|---:|
@@ -309,7 +309,7 @@ The gap between those two columns is the single most important caveat in this re
 | Challenger test WAPE | 9.86% |
 | Baseline | `trailing_mean_4` |
 | Baseline test WAPE | 9.85% |
-| Diebold-Mariano p | 0.99227 |
+| Diebold-Mariano p (model vs trailing mean 4) | 0.99227 |
 | **Deployed** | **`trailing_mean_4`** (baseline) |
 
 hgb(lr=0.02,leaves=7,min_leaf=40) did not beat trailing_mean_4 on the test weeks (WAPE 9.86% against 9.85%; Diebold-Mariano p = 0.99227). The baseline is deployed. This is a valid outcome and it is reported as measured rather than worked around -- a simpler predictor that performs as well is the better system.

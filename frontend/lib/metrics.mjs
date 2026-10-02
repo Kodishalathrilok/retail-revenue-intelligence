@@ -132,7 +132,7 @@ export const METRICS = {
     source: 'The model card: every method scored on the same held-out test weeks.',
     endpoint: '/api/v1/forecast/summary',
     tables: ['pub_forecast_summary'],
-    calculation: 'The four-week trailing mean was selected on validation weeks. The machine-learning model would replace it only if its test error were lower and a Diebold-Mariano test found the difference significant at p < 0.05. Neither held, so the trailing mean runs.',
+    calculation: 'The four-week trailing mean was selected on validation weeks. The machine-learning model would replace it only if its test error were lower and a Diebold-Mariano test of the model against that trailing mean found the difference significant at p < 0.05. Neither held, so the trailing mean runs.',
     limitation: 'A tie on one test window, not evidence that no model could do better. Some other simple methods scored lower on the test weeks; switching to one after seeing those scores would be choosing with hindsight.',
   },
   campaign_effect: {

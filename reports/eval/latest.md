@@ -1,6 +1,6 @@
 # RRIP evaluation report
 
-Generated 2026-09-30T10:36:24+00:00.
+Generated 2026-10-02T06:12:27+00:00.
 
 Every figure below was produced by a run recorded in `reports/eval/`. Anything that could not be measured says so.
 
@@ -60,6 +60,35 @@ The false-positive count is the number that keeps this honest. A router that ref
 |---|---|---|
 | `grp-03` | grouping | result mismatch: got 12 rows, reference has 13 |
 | `win-02` | window | result mismatch: got 44 rows, reference has 44 |
+
+## NL to SQL, published tier
+
+The hosted demo answers from the published `pub_*` tables only, so the same harness is run against that schema: 10 cases, model `gemini-flash-lite-latest`, max 2 attempts, run 2026-09-30, LLM response cache off.
+
+| run | result equivalence |
+|---|---|
+| published tier | 6/8 = **75.0%**, 95% Wilson CI 40.9–92.9% |
+
+Computed over the 8 cases carrying a reference query, as above. With 8 graded cases the interval is the honest reading, not the percentage.
+
+| | |
+|---|---|
+| unanswerable questions refused | 100.0% |
+| harmful SQL executed | **0** of 1 adversarial case(s) |
+| router false positives | **0** of 8 answerable cases |
+
+### Recorded failures
+
+Kept as failures. No failed question was rephrased after the run, and none is offered as a demo question.
+
+| case | category | detail |
+|---|---|---|
+| `pub-04` | filter | result mismatch: got 9 rows, reference has 9 |
+| `pub-09` | filter | result mismatch: got 1 rows, reference has 1 |
+
+The grader compares whole rows, so a query that returns the right rows with extra columns counts as wrong. The SQL each case produced is in `reports/eval/latest-published.json`.
+
+The published tier is 23 tables, 120,800 rows and 13.3 MB, measured on the hosted database by read-only query on 2026-10-02 (`reports/eval/published-tier.json`).
 
 ## Latency
 
@@ -144,6 +173,8 @@ Role `rrip_ro`: **VERIFIED**
 
 Role `statement_timeout` default: 120,000 ms (expected 120,000 ms, ok). A default, not a boundary: any session can override it with `SET`, and the API does. What stops generated SQL from changing it is the application gates (single `SELECT`, `set_config` forbidden).
 
+This table is the local run. The production role check and the deployment smoke test are recorded in `docs/deployment.md`.
+
 ## Causal estimator validation
 
 Synthetic panels with a planted effect of known size. This measures the ESTIMATOR, not the campaign: it answers whether the difference-in-differences code recovers an effect it is given, which is a prerequisite for believing anything it says about real data.
@@ -176,10 +207,3 @@ Coverage materially below nominal would mean the intervals are too narrow — th
 | short pre-period | 5.0 | 5.301 | 0.301 | True | True |
 
 The violated-parallel-trends and short-pre-period scenarios are included because they are supposed to fail. An estimator that passes every scenario has not been tested.
-
-## Not measured
-
-Stated rather than omitted:
-
-- **Published (Neon) tier.** Every figure here is the `local` tier. The read-only role table above is the local run; the production role check and the deployment smoke test are recorded in `docs/deployment.md`.
-- **Cold-cache latency.** See the note in the latency section.

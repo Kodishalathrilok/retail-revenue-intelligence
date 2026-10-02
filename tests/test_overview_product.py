@@ -262,6 +262,50 @@ def test_the_forecast_page_leads_with_the_number_and_folds_the_technical_record(
         assert detail in technical, f"{detail} should sit behind the technical disclosure"
 
 
+def test_the_forecast_banner_sits_under_the_cards_in_plain_words() -> None:
+    page = _code_only(_read("app/forecast/page.tsx"))
+    line = "A simple 4-week average matched the ML model's accuracy, so we deploy the simpler one."
+    assert page.count(line) == 1
+    opening = '<Callout tone="caution" title="The machine-learning model did not earn deployment.">'
+    cards, banner, chart, technical = (page.index(marker) for marker in (
+        'label="Typical error, this department"', opening,
+        'title="History and forecast"', '<Disclosure summary="Technical detail'))
+    assert cards < banner < chart < technical, "the banner belongs under the four cards"
+    body = page[banner + len(opening):page.index("</Callout>", banner)]
+    assert "{BANNER_LINE}" in body
+    # The fixed line plus at most one more sentence.
+    assert re.sub(r"\{[^{}]*\}", "", body).count(".") == 1
+
+    # Plain names in the main view; the predictors' own names, the stored
+    # rationale and the test labels only inside Technical detail.
+    main, detail = page[page.index("return ("):technical], page[technical:]
+    for raw in ("summary.deployment_rationale", "summary.challenger.name", "{b.name",
+                "model_version", "dmLabel("):
+        assert raw not in main, f"{raw} is rendered outside Technical detail"
+        assert raw in detail, f"{raw} is no longer in Technical detail"
+    assert "'4-week average'" in page and "Machine-learning model (tested)" in main
+    assert "one week ahead" in main
+
+
+def test_the_stored_pretrend_verdict_and_raw_warnings_are_never_rendered() -> None:
+    # The API stores "did not reject parallel trends"; the approved sentence
+    # names the opposite null. The pages build their own sentence and never
+    # print the stored one, and stored warnings pass through displayWarning.
+    for path in UI_SOURCES + sorted((FRONTEND / "lib").glob("*.mjs")):
+        if ".test." in path.name:
+            continue
+        code = _code_only(path.read_text(encoding="utf-8"))
+        assert not re.search(r"parallel_trends\.verdict|\bpt\.verdict\b", code), path.name
+        assert "did not reject parallel trends" not in code, path.name
+    causal = _code_only(_read("app/causal/page.tsx"))
+    assert "{displayWarning(w)}" in causal and ">{w}<" not in causal
+    assert "campaign_effect: a.warnings.map(displayWarning)" in causal
+    assert "pretrend_test:" not in causal
+    overview = _code_only(_read("app/page.tsx"))
+    assert "pretrendSentence(campaign.data.parallel_trends)" in overview
+    assert "campaign.data.warnings.map(displayWarning)" in overview
+
+
 def test_the_causal_page_leads_with_effect_interval_and_verdict() -> None:
     page = _code_only(_read("app/causal/page.tsx"))
     page = page[page.index("function AnalysisPanel"):]

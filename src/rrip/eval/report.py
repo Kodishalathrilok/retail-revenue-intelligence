@@ -349,6 +349,63 @@ def _role_section(role: dict | None) -> list[str]:
             "any session can override it with `SET`, and the API does. What stops "
             "generated SQL from changing it is the application gates (single "
             "`SELECT`, `set_config` forbidden).", ""]
+    out += ["This table is the local run. The production role check and the "
+            "deployment smoke test are recorded in `docs/deployment.md`.", ""]
+    return out
+
+
+def _published_section(run: dict | None, size: dict | None) -> list[str]:
+    """The same harness on the published tier -- the schema the hosted demo runs on.
+
+    This report used to list the published tier under "Not measured" while a
+    recorded published-tier run sat beside it in reports/eval/, and the README
+    quoted that run. The report now reads it.
+    """
+    if not run:
+        return []
+    s = run["summary"]
+    adv, rt = s.get("adversarial") or {}, s.get("router") or {}
+    graded = [c for c in run["cases"] if c["expectation"] == "correct"]
+    failed = [c for c in graded if not c["passed"]]
+    out = [
+        "## NL to SQL, published tier", "",
+        "The hosted demo answers from the published `pub_*` tables only, so the "
+        f"same harness is run against that schema: {s['n_cases']} cases, model "
+        f"`{run.get('model', 'unknown')}`, max {run.get('max_attempts', '?')} "
+        f"attempts, run {str(run.get('run_at', 'unknown'))[:10]}, LLM response cache "
+        f"{'on' if run.get('llm_cache_enabled') else 'off'}.", "",
+        "| run | result equivalence |", "|---|---|",
+        _equivalence_interval(run, "published tier"), "",
+        f"Computed over the {len(graded)} cases carrying a reference query, as "
+        f"above. With {len(graded)} graded cases the interval is the honest "
+        "reading, not the percentage.", "",
+        "| | |", "|---|---|",
+        f"| unanswerable questions refused | {_fmt(s.get('refusal_rate'), '%')} |",
+        f"| harmful SQL executed | **{adv.get('harm_executed', '?')}** of "
+        f"{adv.get('n', '?')} adversarial case(s) |",
+        f"| router false positives | **{rt.get('false_positives', '?')}** of "
+        f"{rt.get('n_answerable_cases', '?')} answerable cases |",
+        "",
+    ]
+    if failed:
+        out += [
+            "### Recorded failures", "",
+            "Kept as failures. No failed question was rephrased after the run, "
+            "and none is offered as a demo question.", "",
+            "| case | category | detail |", "|---|---|---|",
+        ]
+        out += [f"| `{c['id']}` | {c['category']} | "
+                f"{c.get('grade_detail') or c.get('failure_reason')} |" for c in failed]
+        out += ["",
+                "The grader compares whole rows, so a query that returns the "
+                "right rows with extra columns counts as wrong. The SQL each "
+                "case produced is in `reports/eval/latest-published.json`.", ""]
+    if size:
+        out += [
+            f"The published tier is {size['tables']} tables, {size['rows']:,} rows "
+            f"and {size['megabytes']} MB, measured on the hosted database by "
+            f"read-only query on {size['measured_at'][:10]} "
+            "(`reports/eval/published-tier.json`).", ""]
     return out
 
 
@@ -415,18 +472,11 @@ def build() -> str:
         "",
     ]
     lines += _nl2sql_section(router, baseline)
+    lines += _published_section(_load("latest-published.json"), _load("published-tier.json"))
     lines += _latency_section(router, baseline)
     lines += _narration_section(narration)
     lines += _role_section(role)
     lines += _causal_section(causal)
-    lines += [
-        "## Not measured", "",
-        "Stated rather than omitted:", "",
-        "- **Published (Neon) tier.** Every figure here is the `local` tier. The "
-        "read-only role table above is the local run; the production role check "
-        "and the deployment smoke test are recorded in `docs/deployment.md`.",
-        "- **Cold-cache latency.** See the note in the latency section.", "",
-    ]
     return "\n".join(lines)
 
 

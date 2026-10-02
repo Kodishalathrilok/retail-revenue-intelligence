@@ -27,8 +27,8 @@ import { Workflow } from '@/components/workflow';
 import { fmtMoney, fmtNum, get } from '@/lib/api';
 import { EXAMPLES } from '@/lib/examples';
 import {
-  ENROLMENT_FLOOR_WEEK, STEPS, askHref, driversQuestion, flaggedSummary, forecastDepartment,
-  latestFullWeek, peakWeek,
+  ENROLMENT_FLOOR_WEEK, STEPS, askHref, displayWarning, driversQuestion, flaggedSummary,
+  forecastDepartment, latestFullWeek, peakWeek, pretrendSentence,
 } from '@/lib/overview.mjs';
 
 type Totals = {
@@ -252,7 +252,7 @@ export default function OverviewPage() {
               <CampaignSummary a={campaign.data} />
               <ActionLink primary href="/causal">Investigate campaigns</ActionLink>
               <Explain metrics={['campaign_effect']}
-                       notes={{ campaign_effect: [campaign.data.parallel_trends.verdict, ...campaign.data.warnings] }} />
+                       notes={{ campaign_effect: [pretrendSentence(campaign.data.parallel_trends), ...campaign.data.warnings.map(displayWarning)] }} />
             </div>
           )}
         </Section>

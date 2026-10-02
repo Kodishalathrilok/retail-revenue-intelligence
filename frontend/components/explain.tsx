@@ -6,8 +6,8 @@
  *
  * Opt-in (a closed <details>) and static: the four rows come from
  * lib/metrics.mjs, which restates the SQL and the estimators. No language
- * model writes any of it. `notes` adds what the API itself reported alongside
- * the figure (a basis line, a caveat, a test verdict), shown verbatim.
+ * model writes any of it. `notes` adds what was reported alongside the figure
+ * (a basis line, a caveat, a warning), as the page passes it in.
  */
 
 import { useState } from 'react';

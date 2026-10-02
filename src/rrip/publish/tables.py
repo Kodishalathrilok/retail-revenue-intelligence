@@ -2,8 +2,9 @@
 
 Each entry is a name, a DDL statement and the SELECT that fills it from the
 local star schema. Nothing here reads a fact table at query time on the hosted
-side -- that is the whole point. The 3,713 MB local database becomes roughly
-12 MB of computed results.
+side -- that is the whole point. The 3,713 MB local database becomes 13.3 MB
+on the hosted one: 120,800 rows in 23 tables, measured there and recorded in
+reports/eval/published-tier.json.
 
 IDEMPOTENCE: every table is dropped and recreated inside one transaction per
 table, so re-publishing is safe and a failed publish cannot leave a half-written

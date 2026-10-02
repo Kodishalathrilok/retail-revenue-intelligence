@@ -25,7 +25,7 @@ than implying a full deployment.
 ```
 LOCAL (unchanged)                         HOSTED (aggregate-only)
 ─────────────────────────────────         ───────────────────────────────
-39.6M-row load                            ~50k rows of computed aggregates
+39.6M-row load                            120,800 rows in 23 published tables
 Phase 2 benchmark harness                 FastAPI read-only
 Phase 3 analytical SQL                    Next.js frontend
 DiD estimation (statsmodels)              NL->SQL against aggregate tables
@@ -44,21 +44,38 @@ aggregate that local already computed.
 
 ## What gets published
 
-Roughly 50,000 rows total — about 12 MB, comfortably inside every free tier.
+23 tables, 120,800 rows and 13.3 MB on the hosted database:
+17 computed tables and 6 dimensions, comfortably inside every free tier.
+Measured by read-only query on 2026-10-02 and recorded in
+[`reports/eval/published-tier.json`](../reports/eval/published-tier.json);
+`tests/test_docs_consistency.py` fails if this page, the README and the
+evaluation report stop agreeing on it.
 
-| Table | Rows | Source |
+| Table | Rows | What it holds |
 |---|---:|---|
 | `pub_weekly_revenue` | 102 | Weekly revenue, cumulative, rolling average |
-| `pub_weekly_revenue_by_dept` | ~2,300 | The same, per department, for drill-down |
+| `pub_weekly_revenue_by_dept` | 2,442 | The same, per department, for drill-down |
+| `pub_overview_totals` | 45 | Panel totals, overall and per department |
+| `pub_anomalies` | 9 | Weeks flagged by the z-score rule |
+| `pub_headline` | 5 | Headline figures the publisher fills from measured values |
 | `pub_rfm_segments` | 7 | RFM segment aggregates |
 | `pub_retention_tenure` | 72 | Relative-tenure retention curves |
-| `pub_pareto_products` | ~5,000 | Top products with cumulative revenue share |
-| `pub_commodity_affinity` | ~1,000 | Market basket lift pairs |
+| `pub_pareto_products` | 5,000 | Top products with cumulative revenue share |
+| `pub_commodity_affinity` | 11,292 | Market basket lift pairs |
 | `pub_reorder_by_department` | 12 | Reorder rates |
-| `pub_promo_exposure` | ~250 | Promotional display rate by department and week |
+| `pub_promo_exposure` | 1,901 | Promotional display rate by department and week |
 | `pub_causal_results` | 3 | Pre-computed DiD for campaigns 26, 8, 18 |
-| `pub_causal_pretrend` | ~160 | Pre-period series for the parallel-trends plot |
-| `dim_date`, `dim_week`, `dim_product`, `dim_store`, `dim_household` | ~96,000 | Dimensions, for NL→SQL to have a real schema |
+| `pub_causal_pretrend` | 158 | Pre-period series for the parallel-trends plot |
+| `pub_forecast` | 1,725 | Stored forecast and interval per department and week |
+| `pub_forecast_history` | 1,725 | Actuals beside forecasts, for the chart |
+| `pub_forecast_departments` | 23 | Modelled departments with their test error |
+| `pub_forecast_summary` | 1 | The model card |
+| `pub_dim_product` | 92,353 | Product dimension, so NL→SQL has a real schema |
+| `pub_dim_household` | 2,500 | Household dimension: one row per panel household, no purchases |
+| `pub_dim_date` | 711 | Calendar days |
+| `pub_dim_store` | 582 | Stores |
+| `pub_dim_week` | 102 | Panel weeks |
+| `pub_dim_campaign` | 30 | Campaigns |
 
 ### What is deliberately NOT published
 
@@ -68,14 +85,19 @@ Roughly 50,000 rows total — about 12 MB, comfortably inside every free tier.
   in the UI**, not discovered by a user whose question returns nothing.
 - **Raw household-level rows** — the panel is licensed for research use;
   publishing per-household transaction data to a public endpoint is a licence
-  question, not just a size one.
+  question, not just a size one. The household *dimension* is published (one
+  row per household, no purchases), so the hosted tier is not free of
+  household-level data; it is free of household-level transactions.
 
 ## Honest consequences
 
 1. **NL→SQL is narrower when hosted.** The gates and retry behaviour are
    identical — that is the feature — but the schema it writes against is
    aggregate tables, so "which households bought X" is unanswerable. The hosted
-   UI should say which tables are available.
+   UI should say which tables are available. Measured on this schema the
+   benchmark scores 6/8 result-equivalent (95% Wilson interval 40.9–92.9%),
+   against 29/31 = 93.5% (95% Wilson interval 79.3–98.2%) on the local tier;
+   both runs are in [`reports/eval/latest.md`](../reports/eval/latest.md).
 2. **Causal results are precomputed, not live.** The estimation runs locally and
    the result is published. A hosted user sees the estimate, the confidence
    verdict and the pre-trend plot, but cannot re-run it against a different
