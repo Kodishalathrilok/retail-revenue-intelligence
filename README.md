@@ -35,9 +35,9 @@ figure, and the recorded benchmark behind each engine.
 
 | Forecast | Causal |
 |---|---|
-| ![Forecast: next-week forecast, range, measured error, the two-sentence note on the machine-learning model, history chart and how the forecast is made](docs/screenshots/forecast-desktop.png) | ![Causal: campaign effect, confidence interval, standard error, plain-English verdict and assumptions](docs/screenshots/causal-desktop.png) |
+| ![Forecast: next-week forecast, range, measured error, the two-sentence note on the machine-learning model, the live forecast beside the challenger that was not deployed, history chart and how the forecast is made](docs/screenshots/forecast-desktop.png) | ![Causal: campaign effect, confidence interval, standard error, plain-English verdict and assumptions](docs/screenshots/causal-desktop.png) |
 
-<img src="docs/screenshots/forecast-mobile.jpg" alt="Forecast on a phone: the headline forecast and its range" width="300">
+<img src="docs/screenshots/forecast-mobile.jpg" alt="Forecast on a phone: the note on the machine-learning model, and the live forecast beside the challenger that was not deployed" width="300">
 
 All five were captured from the live demo (published tier) on 2026-10-02.
 

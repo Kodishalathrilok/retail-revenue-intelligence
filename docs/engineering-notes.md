@@ -564,3 +564,37 @@ what made the standby stalls visible. Every step is resumable and idempotent.
 Data quality results are measured at load into `etl_data_quality` and read from
 there by both reconciliation and the assertion suite, so no threshold is
 hardcoded from a profiling pass that computed money in float32.
+
+## Known follow-ups
+
+Open items, kept here so they are not lost. None is a defect in a figure a
+visitor sees: the first three are wording stored in the published database,
+which the pages already work round, and fixing them at the source means
+republishing.
+
+- **The stored pre-trend verdict.** `pub_causal_results` holds the sentence
+  "The pre-period test did not reject parallel trends". The approved wording on
+  the site is "The test did not reject differential pre-treatment trends", so
+  the pages build their own sentence from the test's figures
+  (`pretrendSentence` in `frontend/lib/overview.mjs`) and never print the
+  stored one. Needs a republish to change at the source.
+- **Campaign 18's stored warning.** It says "the estimate below", written when
+  the estimate sat under the warnings; the estimate now leads the page. The
+  page shows "this estimate" instead (`displayWarning`). Needs a republish to
+  change at the source.
+- **The stored deployment rationale.** The forecast model card quotes
+  "Diebold-Mariano p = 0.99227" without naming the test. It is the model
+  against the four-week trailing mean, and the Forecast page says so under the
+  quoted text. Needs a republish to change at the source.
+- **The week link on the Overview.** "Ask what drove week 92" pre-fills "Which
+  5 departments had the highest revenue in week 92?", which has no benchmark
+  case and no recorded production run. The link is labelled "Not a verified
+  demo question." Verifying it properly means registering a published-tier
+  benchmark case with a reference query and running it once against the model.
+- **The figures on this page.** Apart from the published tier's size and the
+  Diebold-Mariano attributions, which were corrected against their sources,
+  the numbers above have not been re-audited since they moved out of the
+  README.
+- **Screenshots follow the pages by hand.** `docs/screenshots/` is retaken
+  from the live demo after a visible change ships; nothing checks that a
+  screenshot still matches its page.
