@@ -135,6 +135,15 @@ export const METRICS = {
     calculation: 'The four-week trailing mean was selected on validation weeks. The machine-learning model would replace it only if its test error were lower and a Diebold-Mariano test of the model against that trailing mean found the difference significant at p < 0.05. Neither held, so the trailing mean runs.',
     limitation: 'A tie on one test window, not evidence that no model could do better. Some other simple methods scored lower on the test weeks; switching to one after seeing those scores would be choosing with hindsight.',
   },
+  forecast_challenger: {
+    label: 'Challenger forecast',
+    definition: 'What the machine-learning model that was tested, and not deployed, forecasts for the same department and the same week as the live forecast.',
+    source: 'Stored with every forecast when the forecasts were built: the model’s own one-week-ahead prediction, beside the live one.',
+    endpoint: '/api/v1/forecast',
+    tables: ['pub_forecast'],
+    calculation: 'A gradient-boosting model fitted on the training weeks predicts the week’s revenue as a ratio of the department’s recent weekly revenue, and the ratio is converted back to dollars. The difference shown is the challenger’s forecast minus the live forecast, in whole dollars, and that difference as a percentage of the live forecast.',
+    limitation: 'It is not the live forecast, and it was not more accurate than the live method. On the held-out test weeks the model’s error was 9.86% and the four-week average’s was 9.85%, and a Diebold-Mariano test of the model against the four-week trailing mean could not tell them apart (p = 0.99227). For a single department the two forecasts can differ widely. The forecast range on this page belongs to the live forecast, not to the challenger.',
+  },
   campaign_effect: {
     label: 'Campaign effect',
     definition: 'The estimated change in weekly spend per household for households in a campaign, compared with households that were not.',
