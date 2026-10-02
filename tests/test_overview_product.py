@@ -54,13 +54,16 @@ def _metrics() -> dict[str, dict]:
 
 
 METRICS = _metrics()
+FORECAST_METRICS = ("forecast", "forecast_range", "forecast_error", "forecast_confidence",
+                    "forecast_method")
+CAUSAL_METRICS = ("campaign_effect", "campaign_interval", "campaign_stderr", "pretrend_test")
 
 
 # --- Explain: static, and true to the backend ------------------------------------
 
 def test_the_parser_sees_every_explain_entry() -> None:
     assert {"revenue", "baskets", "households", "avg_basket", "units", "weekly_revenue",
-            "flagged_weeks", "rfm_segments", "forecast", "campaign_effect"} <= set(METRICS)
+            "flagged_weeks", "rfm_segments", *FORECAST_METRICS, *CAUSAL_METRICS} <= set(METRICS)
 
 
 @pytest.mark.parametrize("key", sorted(METRICS))
@@ -110,6 +113,63 @@ def test_the_forecast_explanation_matches_what_is_deployed() -> None:
     body = METRICS["forecast"]["body"]
     assert deployed == "trailing_mean_4" and "last four completed weeks" in body
     assert HORIZON_WEEKS == 1 and "One week ahead only" in body
+
+
+def test_the_method_comparison_matches_the_recorded_deployment_decision() -> None:
+    meta = json.loads((ROOT / "models/forecast/metadata.json").read_text())
+    dep, body = meta["deployment"], METRICS["forecast_method"]["body"]
+    assert dep["deployed_kind"] == "baseline" and "so the trailing mean runs" in body
+    assert not dep["model_wape_lower"] and not dep["difference_significant"]   # "Neither held"
+    assert f"p < {dep['alpha']}" in body and "Diebold-Mariano" in dep["rule"]
+    assert "selected on validation" in body and "selected on validation" in dep["rule"]
+    # "Some other simple methods scored lower on the test weeks" is a stated
+    # limit, so it has to be true of the recorded scores.
+    scores = meta["metrics"]["test_baselines"]
+    in_use = scores[meta["model_type"]]["wape"]
+    assert any(v["wape"] < in_use for k, v in scores.items() if not k.startswith("__"))
+
+
+def test_the_confidence_label_thresholds_are_the_services() -> None:
+    from rrip.forecast import service
+
+    body = METRICS["forecast_confidence"]["body"]
+    assert f"Up to {service.LIMITED_WAPE_MULTIPLE:g} times is NORMAL" in body
+    assert f"up to {service.LOW_WAPE_MULTIPLE:g} times is LIMITED" in body
+
+
+def test_the_forecast_range_explanation_matches_the_calibration() -> None:
+    from rrip.forecast.contract import VALIDATION_WEEKS
+
+    meta = json.loads((ROOT / "models/forecast/metadata.json").read_text())
+    calibration = meta["conformal"]["calibration"]["0.80"]
+    body = METRICS["forecast_range"]["body"]
+    assert "split conformal" in calibration["method"] and "Split conformal" in body
+    assert "signed" in calibration["method"] and "The two sides can differ" in body
+    assert tuple(calibration["calibration_weeks"]) == VALIDATION_WEEKS
+    assert "validation weeks" in body
+    assert calibration["level"] == 0.8 and "80% level" in body
+
+
+def test_the_causal_explanations_match_the_estimator() -> None:
+    pd = pytest.importorskip("pandas")
+    from rrip.ai import causal
+
+    # Sixty households, four weeks each, with a per-household level so the
+    # residuals are real. Only the interval's construction is under test.
+    rows = [{"household_key": hh, "treated": hh % 2, "post": week // 2,
+             "spend": float(40 + (hh * 7 % 11) + 3 * (week // 2) * (hh % 2) + (hh + week) % 5)}
+            for hh in range(60) for week in range(4)]
+    res = causal.estimate_did(pd.DataFrame(rows))
+    half_width = (res["ci_high"] - res["ci_low"]) / 2
+    assert half_width / res["did_stderr"] == pytest.approx(1.96, abs=0.001)
+    assert "plus and minus 1.96 standard errors" in METRICS["campaign_interval"]["body"]
+
+    source = inspect.getsource(causal.estimate_did)
+    assert 'cov_type="cluster"' in source and '"groups": df["household_key"]' in source
+    assert "clustered by household" in METRICS["campaign_stderr"]["body"]
+
+    alpha = inspect.signature(causal.check_parallel_trends).parameters["alpha"].default
+    assert f"p-value below {alpha} " in METRICS["pretrend_test"]["body"]
 
 
 # --- no misleading chart ---------------------------------------------------------
@@ -174,7 +234,108 @@ def test_the_overview_hands_off_to_ask_with_verified_questions() -> None:
     assert "/forecast?department=" in page and 'href="/causal"' in page
 
 
+# --- Forecast and Causal: business-readable, and no overclaiming -------------------
+
+def _explained(route: str) -> list[str]:
+    groups = re.findall(r"<Explain metrics=\{\[([^\]]+)\]\}", _code_only(_read(PAGES[route])))
+    return [k for g in groups for k in re.findall(r"'(\w+)'", g)]
+
+
+def test_the_forecast_page_explains_every_forecast_figure() -> None:
+    assert _explained("/forecast") == list(FORECAST_METRICS)
+
+
+def test_the_causal_page_explains_effect_interval_error_and_pretrend() -> None:
+    assert _explained("/causal") == list(CAUSAL_METRICS)
+
+
+def test_the_forecast_page_leads_with_the_number_and_folds_the_technical_record() -> None:
+    page = _code_only(_read("app/forecast/page.tsx"))
+    order = [page.index(marker) for marker in (
+        "What to expect in week", 'title="History and forecast"',
+        'title="How this forecast is made"', '<Disclosure summary="Technical detail')]
+    assert order == sorted(order)
+    assert "one week ahead" in page
+    technical = page[order[-1]:]
+    for detail in ("Every method on the held-out test weeks", "deployment_rationale",
+                   "Data windows"):
+        assert detail in technical, f"{detail} should sit behind the technical disclosure"
+
+
+def test_the_causal_page_leads_with_effect_interval_and_verdict() -> None:
+    page = _code_only(_read("app/causal/page.tsx"))
+    page = page[page.index("function AnalysisPanel"):]
+    order = [page.index(marker) for marker in (
+        'label="Estimated effect on weekly spend"', 'label="95% confidence interval"',
+        "title={verdict.headline}", "<Assumptions a={a} />", ">Pre-trend test<")]
+    assert order == sorted(order)
+    whole = _code_only(_read("app/causal/page.tsx"))
+    assert "campaignVerdict(a)" in whole and "pretrendSentence(a.parallel_trends)" in whole
+    for term in ("Parallel trends", "No other campaign", "Targeted, not randomised",
+                 "What the interval covers"):
+        assert f'term="{term}"' in whole
+
+
+OVERCLAIMS = (
+    r"parallel[- ]trends?\s+(hold|holds|held|is proven|are proven|proven|confirmed)",
+    r"trends\s+(hold|are parallel)\b",
+    r"\b(four|4)[- ]weeks?[- ]ahead\b|\bnext (four|4) weeks\b|\b(four|4)-week forecasts?\b",
+    r"\b(there (is|was)|shows?|showed|found|means|had) no effect\b",
+)
+
+
+@pytest.mark.parametrize("path", sorted(p for d in ("app", "components", "lib") for p in (
+    FRONTEND / d).rglob("*.*") if p.suffix in {".ts", ".tsx", ".mjs"} and ".test." not in p.name),
+    ids=lambda p: p.relative_to(FRONTEND).as_posix())
+def test_no_page_overclaims_trends_horizon_or_absence_of_effect(path: Path) -> None:
+    code = _code_only(path.read_text(encoding="utf-8"))
+    # "does not show there was no effect" is the caveat itself, not the claim.
+    code = re.sub(r"(?i)(does not|do not|not the same as) show(ing)?\s+there was no effect", "",
+                  code)
+    for pattern in OVERCLAIMS:
+        assert not re.search(pattern, code, re.I), f"{pattern!r} in {path.name}"
+
+
+@pytest.mark.parametrize("route,step,verb", [
+    ("/query", "explain", "Explain"), ("/forecast", "predict", "Predict"),
+    ("/causal", "investigate", "Investigate")])
+def test_each_engine_page_marks_its_own_step_in_the_workflow(route: str, step: str,
+                                                             verb: str) -> None:
+    page = _code_only(_read(PAGES[route]))
+    assert f'<Workflow current="{step}" heading="Where next" />' in page
+    assert f'eyebrow="{verb} · ' in page
+    # The strip closes the page: nothing but closing tags may follow it.
+    tail = page[page.index("<Workflow"):].split("/>", 1)[1]
+    assert not re.search(r"<[A-Za-z]", tail), "content after the workflow strip"
+    steps = dict(re.findall(r"key: '(\w+)', verb: '(\w+)'", _read("lib/overview.mjs")))
+    assert steps[step] == verb
+
+
+def test_the_overview_names_the_same_four_steps() -> None:
+    verbs = re.findall(r"verb: '(\w+)'", _read("lib/overview.mjs"))
+    assert f'eyebrow="{" → ".join(verbs)}"' in _code_only(_read("app/page.tsx"))
+
+
+@pytest.mark.parametrize("route", ["/forecast", "/causal"])
+def test_every_chart_on_the_engine_pages_has_its_figures_as_a_table(route: str) -> None:
+    code = _code_only(_read(PAGES[route]))
+    charts = code.count("<ResponsiveContainer")
+    assert charts >= 1 and len(re.findall(r"<caption\b", code)) >= charts
+    assert "The same figures are in the table below." in code
+
+
 # --- design consistency and accessibility ----------------------------------------
+
+@pytest.mark.parametrize("path", sorted(p for d in ("app", "components", "lib") for p in (
+    FRONTEND / d).rglob("*.*") if p.suffix in {".ts", ".tsx", ".mjs"} and ".test." not in p.name),
+    ids=lambda p: p.relative_to(FRONTEND).as_posix())
+def test_numbers_are_formatted_in_one_locale(path: Path) -> None:
+    # Formatting in the visitor's locale showed the busiest week as "$1,13,193"
+    # in its card and "$113,193" in the chart's text. Every formatter names en-US.
+    code = _code_only(path.read_text(encoding="utf-8"))
+    for call in re.findall(r"(?:toLocaleString|NumberFormat)\(([^,)]*)", code):
+        assert call.strip() == "'en-US'", f"locale-dependent formatting in {path.name}"
+
 
 @pytest.mark.parametrize("path", UI_SOURCES, ids=lambda p: p.relative_to(FRONTEND).as_posix())
 def test_no_raw_palette_classes_or_hex_colours(path: Path) -> None:

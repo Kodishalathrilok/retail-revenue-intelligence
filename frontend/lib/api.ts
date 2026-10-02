@@ -75,11 +75,15 @@ export async function post<T>(path: string, body: unknown): Promise<T> {
   return r.json();
 }
 
+// 'en-US', not the visitor's locale: these are US dollars from a US retailer,
+// and the chart text and verdict sentences (lib/overview.mjs, lib/answer.mjs)
+// are already fixed to it. Left to the browser, an en-IN visitor saw the
+// busiest week as "$1,13,193" in its card and "$113,193" in the chart's text.
 export const fmtMoney = (v: number | string | null | undefined) =>
   v === null || v === undefined ? '—'
-    : Number(v).toLocaleString(undefined, { style: 'currency', currency: 'USD',
+    : Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD',
         maximumFractionDigits: 0 });
 
 export const fmtNum = (v: number | string | null | undefined, dp = 0) =>
   v === null || v === undefined ? '—'
-    : Number(v).toLocaleString(undefined, { maximumFractionDigits: dp });
+    : Number(v).toLocaleString('en-US', { maximumFractionDigits: dp });

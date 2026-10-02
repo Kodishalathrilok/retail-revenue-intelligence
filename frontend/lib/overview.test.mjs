@@ -2,9 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_FORECAST_DEPARTMENT, ENROLMENT_FLOOR_WEEK, STEPS, askHref, driversQuestion,
-  effectSummary, flaggedSummary, forecastDepartment, latestFullWeek, peakWeek, signedMoney,
-  splitFlagged, weekList, weeklyAlt,
+  DEFAULT_FORECAST_DEPARTMENT, ENROLMENT_FLOOR_WEEK, STEPS, askHref, campaignVerdict,
+  driversQuestion, effectSummary, flaggedSummary, forecastDepartment, latestFullWeek, peakWeek,
+  pretrendSentence, signedMoney, splitFlagged, weekList, weeklyAlt,
 } from './overview.mjs';
 import { METRICS, metric } from './metrics.mjs';
 
@@ -64,7 +64,7 @@ test('an interval that includes zero is never worded as no effect or as proof', 
   assert.equal(s.includesZero, true);
   assert.match(s.sentence, /\+\$1\.51 per household per week/);
   assert.match(s.sentence, /−\$2\.35 to \+\$5\.36/);
-  assert.match(s.sentence, /cannot tell this apart from no change/);
+  assert.match(s.sentence, /do not rule out a zero or small effect/);
   assert.match(s.sentence, /not the same as showing there was no effect/);
   assert.doesNotMatch(s.sentence, /proves|proven|caused/);
 });
@@ -74,6 +74,46 @@ test('an interval that excludes zero is still an estimate, not proof', () => {
   assert.equal(s.includesZero, false);
   assert.match(s.sentence, /excludes zero/);
   assert.match(s.sentence, /not proof/);
+});
+
+// What production returns for campaign 26 (clean) and campaign 18 (contaminated).
+const C26 = { did_estimate: 1.5068, ci_low: -2.3494, ci_high: 5.363, confidence: 'WEAK',
+  parallel_trends: { passed: true, interaction_pvalue: 0.387544, verdict: 'v' } };
+const C18 = { did_estimate: -5.3455, ci_low: -11.9133, ci_high: 1.2224, confidence: 'NOT CREDIBLE',
+  parallel_trends: { passed: false, interaction_pvalue: 0.011849, verdict: 'v' } };
+
+test('the verdict for an interval that includes zero does not rule out a small effect', () => {
+  const v = campaignVerdict(C26);
+  assert.equal(v.headline, 'The data do not rule out a zero or small effect');
+  assert.match(v.detail, /not evidence that the campaign did nothing/);
+  assert.doesNotMatch(v.headline, /no effect|did not work|ineffective/i);
+});
+
+test('a failed pre-trend test or a not-credible label blocks attribution', () => {
+  assert.match(campaignVerdict(C18).headline, /should not be attributed to the campaign/);
+  assert.match(campaignVerdict(C18).detail, /already moving apart before the campaign/);
+  const contaminated = { ...C26, confidence: 'NOT CREDIBLE' };
+  assert.match(campaignVerdict(contaminated).headline, /should not be attributed/);
+});
+
+test('an interval that excludes zero is a direction, never proof', () => {
+  const v = campaignVerdict({ ...C26, did_estimate: 4, ci_low: 1, ci_high: 7, confidence: 'CREDIBLE' });
+  assert.match(v.headline, /point to an increase/);
+  assert.match(v.detail, /not proof/);
+  assert.match(campaignVerdict({ ...C26, did_estimate: -4, ci_low: -7, ci_high: -1 }).headline, /a decrease/);
+});
+
+test('a pre-trend pass is worded as non-rejection, never as parallel trends holding', () => {
+  const s = pretrendSentence(C26.parallel_trends);
+  assert.match(s, /^The test did not reject differential pre-treatment trends \(interaction p = 0\.388\)\./);
+  assert.match(s, /low-power test/);
+  assert.match(s, /cannot confirm/);
+  assert.doesNotMatch(s, /trends hold|holds|proven|proves|supported|confirmed/i);
+  const failed = pretrendSentence(C18.parallel_trends);
+  assert.match(failed, /already diverging before the campaign \(interaction p = 0\.0118\)/);
+  assert.match(failed, /violated/);
+  // Too few pre-campaign weeks: no p-value, so the API's wording stands.
+  assert.equal(pretrendSentence({ passed: false, interaction_pvalue: NaN, verdict: 'INSUFFICIENT' }), 'INSUFFICIENT');
 });
 
 test('ask links carry the question and the drivers question names the week', () => {
@@ -124,4 +164,15 @@ test('the Explain text states the limits that matter', () => {
   assert.match(METRICS.forecast.limitation, /One week ahead only/);
   assert.match(METRICS.campaign_effect.limitation, /not randomised/);
   assert.match(METRICS.campaign_effect.limitation, /does not show there was no effect/);
+  assert.match(METRICS.campaign_interval.limitation, /do not rule out a zero or small effect/);
+  assert.match(METRICS.pretrend_test.limitation, /not evidence that the trends were parallel/);
+  assert.match(METRICS.forecast_method.limitation, /not evidence that no model could do better/);
+});
+
+test('no Explain entry claims parallel trends hold or a forecast beyond one week', () => {
+  for (const [key, m] of Object.entries(METRICS)) {
+    const text = [m.definition, m.source, m.calculation, m.limitation].join(' ');
+    assert.doesNotMatch(text, /parallel trends (hold|are proven|were proven)|trends hold/i, key);
+    assert.doesNotMatch(text, /(four|4)[- ]weeks?[- ]ahead|next (four|4) weeks|(four|4)-week forecast/i, key);
+  }
 });

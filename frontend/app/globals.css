@@ -75,6 +75,13 @@ body {
   }
 }
 
+/* Recharts paints each legend label in its series colour. For the forecast
+   range that is a 16%-alpha fill, which left its label unreadable; the swatch
+   beside the label already carries the colour. */
+.recharts-legend-item-text {
+  color: var(--color-ink-2) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

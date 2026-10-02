@@ -121,12 +121,62 @@ export function effectSummary(a) {
     includesZero,
     sentence: includesZero
       ? `The estimate is ${est} per household per week, but the 95% interval runs from ${lo} `
-        + `to ${hi}. It includes zero, so the data cannot tell this apart from no change. `
+        + `to ${hi}. It includes zero, so the data do not rule out a zero or small effect. `
         + 'That is not the same as showing there was no effect.'
       : `The estimate is ${est} per household per week, and the 95% interval (${lo} to ${hi}) `
         + 'excludes zero. It is still an estimate that rests on the parallel-trends assumption, '
         + 'not proof.',
   };
+}
+
+/**
+ * How far to trust the campaign estimate, in plain words: the verdict that
+ * leads the Causal page. It reads only what the API reported (the pre-trend
+ * test, the evidence label, the interval) and never upgrades it.
+ * @returns {{headline: string, detail: string}}
+ */
+export function campaignVerdict(a) {
+  if (!a.parallel_trends.passed) {
+    return {
+      headline: 'This estimate should not be attributed to the campaign',
+      detail: 'The two groups were already moving apart before the campaign started, so the '
+        + 'comparison picks up that divergence as well as anything the campaign did.',
+    };
+  }
+  if (a.confidence === 'NOT CREDIBLE') {
+    return {
+      headline: 'This estimate should not be attributed to the campaign',
+      detail: 'The checks reported with it do not support reading it as the effect of this campaign.',
+    };
+  }
+  if (effectSummary(a).includesZero) {
+    return {
+      headline: 'The data do not rule out a zero or small effect',
+      detail: 'The interval spans both a decrease and an increase in weekly spend. That is not '
+        + 'evidence that the campaign did nothing.',
+    };
+  }
+  return {
+    headline: `The data point to ${a.did_estimate < 0 ? 'a decrease' : 'an increase'} in weekly spend`,
+    detail: 'The interval excludes zero. It is still an estimate that depends on the assumptions '
+      + 'listed here, not proof.',
+  };
+}
+
+/**
+ * The pre-trend test's result in plain words. A pass is worded as
+ * non-rejection, never as the trends being parallel.
+ */
+export function pretrendSentence(pt) {
+  const p = Number(pt.interaction_pvalue);
+  // Too few pre-campaign weeks to run the test: the API's own wording says so.
+  if (!Number.isFinite(p)) return pt.verdict;
+  return pt.passed
+    ? `The test did not reject differential pre-treatment trends (interaction p = ${p.toFixed(3)}). `
+      + 'It found no sign of the groups diverging before the campaign, but it is a low-power test '
+      + 'and cannot confirm that they were moving in parallel.'
+    : `The test found the two groups already diverging before the campaign (interaction p = ${p.toFixed(4)}), `
+      + 'so the parallel-trends assumption is violated.';
 }
 
 /** A link into Ask with the question filled in. Ask never auto-runs it. */

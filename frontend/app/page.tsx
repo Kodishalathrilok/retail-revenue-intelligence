@@ -21,7 +21,7 @@ import {
   type Campaign, type Flagged, type Forecast, type Segment, type Weekly,
 } from '@/components/overview';
 import {
-  ActionLink, Callout, ErrorState, PageHeader, Section, Skeleton, Stat,
+  ActionLink, Callout, ErrorState, Fact, PageHeader, Section, Skeleton, Stat,
 } from '@/components/ui';
 import { Workflow } from '@/components/workflow';
 import { fmtMoney, fmtNum, get } from '@/lib/api';
@@ -63,16 +63,6 @@ const stepLabel = (key: string) => {
 };
 
 const verified = (benchmark: string) => EXAMPLES.find((e) => e.benchmark === benchmark)?.question;
-
-function Fact({ label, value, sub }: { label: string; value: string; sub: React.ReactNode }) {
-  return (
-    <div className="border-l-2 border-rule pl-3">
-      <dt className="text-xs uppercase tracking-wide text-muted">{label}</dt>
-      <dd className="mt-0.5 text-xl font-semibold tabular-nums text-ink">{value}</dd>
-      <dd className="text-xs text-muted">{sub}</dd>
-    </div>
-  );
-}
 
 export default function OverviewPage() {
   const id = useId();
