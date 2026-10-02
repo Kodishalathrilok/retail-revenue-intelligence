@@ -166,17 +166,34 @@ export function campaignVerdict(a) {
 /**
  * The pre-trend test's result in plain words. A pass is worded as
  * non-rejection, never as the trends being parallel.
+ *
+ * This is the only pre-trend sentence the pages show. The API also stores a
+ * verdict string ("did not reject parallel trends"), which names the opposite
+ * null from the approved sentence; shown side by side the two read as a
+ * contradiction, so the stored text is never rendered. It is built from the
+ * figures alone: whether the test passed and its p-value.
  */
 export function pretrendSentence(pt) {
   const p = Number(pt.interaction_pvalue);
-  // Too few pre-campaign weeks to run the test: the API's own wording says so.
-  if (!Number.isFinite(p)) return pt.verdict;
+  if (!Number.isFinite(p)) {
+    return 'There were too few pre-campaign weeks to run the test, so the parallel-trends '
+      + 'assumption is unchecked.';
+  }
   return pt.passed
     ? `The test did not reject differential pre-treatment trends (interaction p = ${p.toFixed(3)}). `
       + 'It found no sign of the groups diverging before the campaign, but it is a low-power test '
       + 'and cannot confirm that they were moving in parallel.'
     : `The test found the two groups already diverging before the campaign (interaction p = ${p.toFixed(4)}), `
       + 'so the parallel-trends assumption is violated.';
+}
+
+/**
+ * A stored analysis warning, as the page shows it. The warnings were written
+ * when the estimate sat under them; it now leads the page, so "the estimate
+ * below" points the wrong way. Only that phrase is changed.
+ */
+export function displayWarning(warning) {
+  return String(warning).replace(/\bthe estimate below\b/g, 'this estimate');
 }
 
 /** A link into Ask with the question filled in. Ask never auto-runs it. */

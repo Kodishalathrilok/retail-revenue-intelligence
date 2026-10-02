@@ -13,8 +13,11 @@
  *
  * Deliberately NOT listed: pub-09 ("which full week had the highest revenue")
  * matched the data but failed the grader (extra column) in the live run, and is
- * kept as a recorded failure rather than rephrased after the fact. pub-01 and
- * pub-03 pass but are too trivial to demonstrate anything.
+ * kept as a recorded failure rather than rephrased after the fact. pub-04
+ * ("which weeks were flagged as anomalies") failed the same way in the same
+ * run -- the right nine weeks, with extra columns -- and is kept as a recorded
+ * failure on the same terms. pub-01 and pub-03 pass but are too trivial to
+ * demonstrate anything.
  */
 
 export type Example = {

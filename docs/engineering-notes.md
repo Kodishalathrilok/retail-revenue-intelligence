@@ -4,7 +4,9 @@ The long-form write-up behind the project: what the data says, how each layer
 was built, what was measured, and what went wrong first. It was the body of the
 README until the README was rewritten to lead with the product; the text moved
 here unchanged apart from its links, one out-of-date framework version, and a
-test-count section that had gone stale and was dropped.
+test-count section that had gone stale and was dropped. Two statements were
+corrected afterwards against their sources: the published tier's size, and
+which comparison two Diebold-Mariano p-values belong to.
 
 **Status of the figures on this page.** The README's numbers are each tied to a
 tracked file and checked by `tests/test_readme_claims.py`. The figures below
@@ -278,10 +280,13 @@ left in place deliberately:
   project.** Picking whichever candidate scored best on weeks 88–101 converts
   that number from an unbiased estimate into a selection statistic, and there
   is no second held-out set to recover one from.
-- **The gaps are not resolvable anyway.** The deployed baseline is
-  statistically indistinguishable from the two trailing-window baselines above
-  it — Diebold-Mariano p = 0.26 against the 8-week mean and p = 0.17 against
-  the 8-week median.
+- **The gaps are not resolvable anyway.** Every Diebold-Mariano test recorded
+  here compares the challenger model with a baseline; none compares one
+  baseline with another. The model ties the deployed baseline (model vs
+  trailing mean 4, p = 0.99) and cannot be told apart from the two baselines
+  ranked above it (model vs trailing mean 8, p = 0.26; model vs trailing
+  median 8, p = 0.17). That is indirect evidence that the three are not
+  separable on this test set, not a direct test of it.
 - **There is direct evidence those gaps are noise.** The ordering of the three
   trailing-window baselines is *exactly reversed* between validation and test:
 
@@ -518,7 +523,7 @@ find it by hitting a wall:
 
 | | Local (full pipeline) | Hosted (aggregate tier) |
 |---|---|---|
-| Data | 39.6M rows, 3,713 MB | **120,800 rows, 14.6 MB** (measured) |
+| Data | 39.6M rows, 3,713 MB | **120,800 rows, 13.3 MB** (measured on the hosted database) |
 | Executive overview | ✅ | ✅ from `pub_weekly_revenue*` |
 | Department drill-down | ✅ | ✅ from `pub_weekly_revenue_by_dept` |
 | RFM, retention, Pareto, affinity | ✅ | ✅ precomputed |

@@ -3,8 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_FORECAST_DEPARTMENT, ENROLMENT_FLOOR_WEEK, STEPS, askHref, campaignVerdict,
-  driversQuestion, effectSummary, flaggedSummary, forecastDepartment, latestFullWeek, peakWeek,
-  pretrendSentence, signedMoney, splitFlagged, weekList, weeklyAlt,
+  displayWarning, driversQuestion, effectSummary, flaggedSummary, forecastDepartment,
+  latestFullWeek, peakWeek, pretrendSentence, signedMoney, splitFlagged, weekList, weeklyAlt,
 } from './overview.mjs';
 import { METRICS, metric } from './metrics.mjs';
 
@@ -76,11 +76,42 @@ test('an interval that excludes zero is still an estimate, not proof', () => {
   assert.match(s.sentence, /not proof/);
 });
 
-// What production returns for campaign 26 (clean) and campaign 18 (contaminated).
+// What production returns for campaign 26 (clean) and campaign 18
+// (contaminated), stored verdict and warning strings included, verbatim.
 const C26 = { did_estimate: 1.5068, ci_low: -2.3494, ci_high: 5.363, confidence: 'WEAK',
-  parallel_trends: { passed: true, interaction_pvalue: 0.387544, verdict: 'v' } };
+  parallel_trends: { passed: true, interaction_pvalue: 0.387544,
+    verdict: 'The pre-period test did not reject parallel trends (interaction p = 0.388). This is '
+      + 'a low-power linear test, so it is consistent with parallel trends but does not prove them.' },
+  warnings: ['the DiD estimate is not statistically distinguishable from zero (p = 0.444).'] };
 const C18 = { did_estimate: -5.3455, ci_low: -11.9133, ci_high: 1.2224, confidence: 'NOT CREDIBLE',
-  parallel_trends: { passed: false, interaction_pvalue: 0.011849, verdict: 'v' } };
+  parallel_trends: { passed: false, interaction_pvalue: 0.011849,
+    verdict: 'Pre-period trends DIVERGE (interaction p = 0.0118). Parallel trends is VIOLATED and '
+      + 'the DiD estimate is not attributable to the campaign.' },
+  warnings: [
+    'PARALLEL TRENDS VIOLATED -- the groups were already diverging before the campaign, so the '
+      + 'estimate below cannot be attributed to it.',
+    '90.8% of enrolled households were simultaneously in an overlapping campaign; this measures '
+      + 'a bundle, not this campaign.',
+    'the DiD estimate is not statistically distinguishable from zero (p = 0.111).'] };
+
+/** Every string the Causal page and its Explain panel build for one campaign. */
+const rendered = (a) => [
+  campaignVerdict(a).headline, campaignVerdict(a).detail, effectSummary(a).sentence,
+  pretrendSentence(a.parallel_trends), ...a.warnings.map(displayWarning),
+];
+
+// Phrasings the project rules out, wherever they would be shown.
+const RULED_OUT = [
+  /parallel[- ]trends?\s+(hold|holds|held|are proven|is proven|proven|confirmed)/i,
+  /trends\s+(hold|are parallel)\b/i,
+  /did not reject parallel trends/i,           // the stored verdict's wording
+  /\bthe estimate below\b/i,                   // the estimate now leads the page
+  /\b(there (is|was)|shows?|showed|found|means|had) no effect\b/i,
+  /\b(four|4)[- ]weeks?[- ]ahead\b|\bnext (four|4) weeks\b|\b(four|4)-week forecasts?\b/i,
+];
+// "does not show there was no effect" is the caveat itself, not the claim.
+const claims = (text) => text
+  .replace(/(does not|do not|not the same as) show(ing)?\s+there was no effect/gi, '');
 
 test('the verdict for an interval that includes zero does not rule out a small effect', () => {
   const v = campaignVerdict(C26);
@@ -112,8 +143,47 @@ test('a pre-trend pass is worded as non-rejection, never as parallel trends hold
   const failed = pretrendSentence(C18.parallel_trends);
   assert.match(failed, /already diverging before the campaign \(interaction p = 0\.0118\)/);
   assert.match(failed, /violated/);
-  // Too few pre-campaign weeks: no p-value, so the API's wording stands.
-  assert.equal(pretrendSentence({ passed: false, interaction_pvalue: NaN, verdict: 'INSUFFICIENT' }), 'INSUFFICIENT');
+  // Too few pre-campaign weeks: no p-value. The page still words it itself.
+  const untested = pretrendSentence({ passed: false, interaction_pvalue: NaN, verdict: 'INSUFFICIENT' });
+  assert.match(untested, /too few pre-campaign weeks/);
+  assert.doesNotMatch(untested, /INSUFFICIENT/);
+});
+
+test('the stored pre-trend verdict is never what the page shows', () => {
+  for (const a of [C26, C18]) {
+    const shown = pretrendSentence(a.parallel_trends);
+    assert.notEqual(shown, a.parallel_trends.verdict);
+    assert.ok(!rendered(a).includes(a.parallel_trends.verdict));
+  }
+  // The approved sentence and the stored one name opposite nulls; only one may appear.
+  assert.match(pretrendSentence(C26.parallel_trends), /did not reject differential pre-treatment trends/);
+  assert.doesNotMatch(rendered(C26).join(' '), /did not reject parallel trends/);
+});
+
+test('a stored warning that points at "the estimate below" is reworded, and only that', () => {
+  assert.equal(displayWarning(C18.warnings[0]),
+    'PARALLEL TRENDS VIOLATED -- the groups were already diverging before the campaign, so '
+    + 'this estimate cannot be attributed to it.');
+  assert.equal(displayWarning(C18.warnings[1]), C18.warnings[1]);
+  assert.equal(displayWarning(C26.warnings[0]), C26.warnings[0]);
+});
+
+test('nothing rendered for either campaign uses a ruled-out phrasing', () => {
+  for (const a of [C26, C18]) {
+    for (const text of rendered(a)) {
+      for (const pattern of RULED_OUT) assert.doesNotMatch(claims(text), pattern);
+    }
+  }
+  // The scan has teeth: the stored strings themselves trip it.
+  assert.ok(RULED_OUT.some((p) => p.test(C26.parallel_trends.verdict)));
+  assert.ok(RULED_OUT.some((p) => p.test(C18.warnings[0])));
+});
+
+test('no Explain text uses a ruled-out phrasing', () => {
+  for (const [key, m] of Object.entries(METRICS)) {
+    const text = claims([m.label, m.definition, m.source, m.calculation, m.limitation].join(' '));
+    for (const pattern of RULED_OUT) assert.doesNotMatch(text, pattern, key);
+  }
 });
 
 test('ask links carry the question and the drivers question names the week', () => {

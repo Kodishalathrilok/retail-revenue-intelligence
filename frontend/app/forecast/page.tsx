@@ -9,10 +9,14 @@
  *
  * The page used to open with the deployment result (the tested ML model did
  * not beat a four-week trailing mean) above the forecast itself. That finding
- * has not become a footnote: it is the "How this forecast is made" section, in
- * plain words next to the measured error, so the reader still learns before
- * acting that this is a smoothed recent average with a measured error band --
- * not a model that has found something.
+ * has not become a footnote: it is a two-sentence banner directly under the
+ * four headline figures, so the reader still learns before acting that this is
+ * a smoothed recent average with a measured error band -- not a model that has
+ * found something.
+ *
+ * The main view uses plain names ("machine-learning model", "4-week average").
+ * The predictors' own names, the stored deployment rationale and the
+ * Diebold-Mariano tests are inside "Technical detail".
  *
  * Three things stay next to every forecast for the same reason:
  *   - the prediction interval, because a point estimate presented alone reads
@@ -36,7 +40,7 @@ import {
 } from '@/components/chart-theme';
 import { Explain } from '@/components/explain';
 import {
-  Badge, Disclosure, ErrorState, Fact, PageHeader, Section, Skeleton, Stat, type Tone,
+  Badge, Callout, Disclosure, ErrorState, Fact, PageHeader, Section, Skeleton, Stat, type Tone,
 } from '@/components/ui';
 import { Workflow } from '@/components/workflow';
 import { fmtMoney, fmtNum, get } from '@/lib/api';
@@ -85,6 +89,8 @@ type Summary = {
     test: { scores: { wape: number; mae: number } };
     test_baselines: Record<string, { wape: number; mae: number; rmse: number }>;
     macro_wape_test: number;
+    // Keyed "model_vs_<baseline>": every test is the model against a baseline.
+    diebold_mariano_pairwise?: Record<string, { p_value: number; mean_loss_diff: number }>;
   };
   conformal: { test_coverage: Record<string, { coverage: number }> };
   leakage_audit_passed: boolean;
@@ -98,10 +104,20 @@ const CONFIDENCE_TONE: Record<string, Tone> = {
 
 const CHALLENGER = '__challenger_model__';
 
-/** "trailing_mean_4" as a reader would say it. Worded as an average of past
- *  weeks so it cannot be read as a forecast four weeks out. */
+const FOUR_WEEK_MEAN = 'trailing_mean_4';
+
+/** The deployed method as a reader would say it. It is an average of the four
+ *  weeks just gone; the forecast it produces is still one week ahead. */
 const methodName = (modelType: string) =>
-  modelType === 'trailing_mean_4' ? 'Average of the last four weeks' : modelType.replace(/_/g, ' ');
+  modelType === FOUR_WEEK_MEAN ? '4-week average' : modelType.replace(/_/g, ' ');
+
+/** A Diebold-Mariano key from the model card, as the forecast report prints
+ *  it: "model_vs_trailing_mean_8" becomes "model vs trailing mean 8". */
+const dmLabel = (key: string) => key.replace(/_/g, ' ');
+
+// Fixed wording. It is shown only when the model card says exactly this: the
+// baseline was deployed, and that baseline is the four-week trailing mean.
+const BANNER_LINE = "A simple 4-week average matched the ML model's accuracy, so we deploy the simpler one.";
 
 // The forecast and its range are drawn only where the predictor was not
 // fitted: the held-out test weeks and the future week. An in-sample fit is
@@ -172,6 +188,7 @@ export default function ForecastPage() {
   const deployed = summary?.metrics.test_baselines[summary.model_type];
   const challenger = summary?.metrics.test_baselines[CHALLENGER];
   const baselineRuns = summary?.deployed_kind === 'baseline';
+  const dmTests = Object.entries(summary?.metrics.diebold_mariano_pairwise ?? {});
 
   return (
     <div className="space-y-8">
@@ -250,6 +267,17 @@ export default function ForecastPage() {
               )}
             </div>
 
+            {/* Under the four figures, not above them: the number first, then
+                two sentences on what kind of number it is. */}
+            {summary && deployed && challenger && baselineRuns
+              && summary.model_type === FOUR_WEEK_MEAN && (
+              <Callout tone="caution" title="The machine-learning model did not earn deployment.">
+                {BANNER_LINE} On held-out weeks {summary.windows.test[0]}–
+                {summary.windows.test[1]} the model was off by {pct(challenger.wape, 2)} of
+                revenue and the 4-week average by {pct(deployed.wape, 2)}.
+              </Callout>
+            )}
+
             <div className="flex flex-wrap items-center gap-3">
               <Badge tone={CONFIDENCE_TONE[forecast.confidence] ?? 'neutral'}>
                 Confidence: {forecast.confidence}
@@ -284,7 +312,6 @@ export default function ForecastPage() {
                          `Test weeks ${forecast.accuracy.test_weeks[0]}–${forecast.accuracy.test_weeks[1]}; pooled error ${pct(forecast.accuracy.pooled_wape, 2)}.`,
                        ],
                        forecast_confidence: forecast.confidence_reasons,
-                       forecast_method: [summary?.deployment_rationale],
                      }} />
           </section>
 
@@ -375,13 +402,6 @@ export default function ForecastPage() {
             <div className="space-y-5">
               <p className="max-w-[65ch] text-base text-ink-2">
                 {forecast.explanation.description}{' '}
-                {summary && baselineRuns && (
-                  <>
-                    A machine-learning model was tested against this method on weeks{' '}
-                    {summary.windows.test[0]}–{summary.windows.test[1]} and did not do
-                    better, so the simpler method is the one that runs.{' '}
-                  </>
-                )}
                 It cannot anticipate a promotion, a spike or a level shift.
               </p>
 
@@ -457,7 +477,12 @@ export default function ForecastPage() {
                                 className={`border-t border-rule ${
                                   isDeployed ? 'font-semibold text-ink' : 'text-ink-2'}`}>
                               <th scope="row" className={`py-1.5 text-left ${isDeployed ? '' : 'font-normal'}`}>
-                                {b.name === CHALLENGER ? 'ML challenger' : b.name.replace(/_/g, ' ')}
+                                <code className="break-all font-mono text-xs">
+                                  {b.name === CHALLENGER ? summary.challenger.name ?? 'model' : b.name}
+                                </code>
+                                {b.name === CHALLENGER && (
+                                  <span className="ml-2 text-xs text-muted">machine-learning model</span>
+                                )}
                                 {isDeployed && (
                                   <span className="ml-2 rounded bg-ink px-1.5 py-0.5 text-[10px] uppercase text-paper">
                                     in use
@@ -486,9 +511,52 @@ export default function ForecastPage() {
                   </p>
                 </div>
 
+                {dmTests.length > 0 && (
+                  <div>
+                    <h3 className="font-medium text-ink">Diebold-Mariano tests: the model against each baseline</h3>
+                    <p className="mt-1 max-w-[70ch] text-sm text-muted">
+                      Each row tests the machine-learning model against one baseline, on
+                      absolute-error loss. No row tests one baseline against another.
+                    </p>
+                    <div className="mt-3 overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <caption className="sr-only">Diebold-Mariano p-value of the model against each baseline</caption>
+                        <thead className="text-xs uppercase tracking-wide text-muted">
+                          <tr>
+                            <th scope="col" className="pb-1 text-left font-medium">comparison</th>
+                            <th scope="col" className="pb-1 text-right font-medium">p</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dmTests.map(([key, t]) => {
+                            const decides = key === `model_vs_${summary.model_type}`;
+                            return (
+                              <tr key={key} className={`border-t border-rule ${
+                                decides ? 'font-semibold text-ink' : 'text-ink-2'}`}>
+                                <th scope="row" className={`py-1.5 text-left ${decides ? '' : 'font-normal'}`}>
+                                  {dmLabel(key)}
+                                  {decides && (
+                                    <span className="ml-2 text-xs font-normal text-muted">
+                                      the test the deployment rule used
+                                    </span>
+                                  )}
+                                </th>
+                                <td className="py-1.5 text-right tabular-nums">{t.p_value}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <h3 className="font-medium text-ink">Why this method runs</h3>
-                  <p className="mt-1 max-w-[70ch] text-sm text-ink-2">{summary.deployment_rationale}</p>
+                  <p className="mt-1 max-w-[70ch] break-words text-sm text-ink-2">{summary.deployment_rationale}</p>
+                  <p className="mt-1 max-w-[70ch] text-xs text-muted">
+                    The Diebold-Mariano p-value quoted there is {dmLabel(`model_vs_${summary.model_type}`)}.
+                  </p>
                 </div>
 
                 <div>

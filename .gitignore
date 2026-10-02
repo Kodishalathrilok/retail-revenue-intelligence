@@ -35,6 +35,7 @@ reports/eval/*
 # ...and the two recorded runs the README quotes figures from.
 !reports/eval/latest-published.json
 !reports/eval/causal-campaigns.json
+!reports/eval/published-tier.json
 docs/_generated/
 
 # --- Node / Next.js (Phase 7) ---

@@ -35,7 +35,7 @@ export type Campaign = {
   campaign_id: number; treated_n: number; control_n: number; contaminated_pct: number;
   did_estimate: number; did_pvalue: number; ci_low: number; ci_high: number;
   confidence: string; warnings: string[];
-  parallel_trends: { passed: boolean; verdict: string };
+  parallel_trends: { passed: boolean; interaction_pvalue: number };
 };
 
 const compactUsd = new Intl.NumberFormat('en-US', {

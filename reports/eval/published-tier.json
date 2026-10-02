@@ -1,0 +1,128 @@
+{
+  "measured_at": "2026-10-02T06:07:22+00:00",
+  "source": "read-only SELECT against the hosted published database (session default_transaction_read_only = on)",
+  "query": "for each table in pub_manifest: SELECT count(*) and pg_total_relation_size(table)",
+  "server": "PostgreSQL 16.15 (eb11870) on aarch64-unknown-linux-gnu",
+  "published_at": "2026-09-29T16:36:00.054868+00:00",
+  "tables": 23,
+  "rows": 120800,
+  "bytes": 13918208,
+  "megabytes": 13.3,
+  "per_table": [
+    {
+      "table": "pub_anomalies",
+      "rows": 9,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_causal_pretrend",
+      "rows": 158,
+      "bytes": 24576
+    },
+    {
+      "table": "pub_causal_results",
+      "rows": 3,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_commodity_affinity",
+      "rows": 11292,
+      "bytes": 974848
+    },
+    {
+      "table": "pub_dim_campaign",
+      "rows": 30,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_dim_date",
+      "rows": 711,
+      "bytes": 65536
+    },
+    {
+      "table": "pub_dim_household",
+      "rows": 2500,
+      "bytes": 188416
+    },
+    {
+      "table": "pub_dim_product",
+      "rows": 92353,
+      "bytes": 8314880
+    },
+    {
+      "table": "pub_dim_store",
+      "rows": 582,
+      "bytes": 24576
+    },
+    {
+      "table": "pub_dim_week",
+      "rows": 102,
+      "bytes": 8192
+    },
+    {
+      "table": "pub_forecast",
+      "rows": 1725,
+      "bytes": 3055616
+    },
+    {
+      "table": "pub_forecast_departments",
+      "rows": 23,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_forecast_history",
+      "rows": 1725,
+      "bytes": 262144
+    },
+    {
+      "table": "pub_forecast_summary",
+      "rows": 1,
+      "bytes": 32768
+    },
+    {
+      "table": "pub_headline",
+      "rows": 5,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_overview_totals",
+      "rows": 45,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_pareto_products",
+      "rows": 5000,
+      "bytes": 425984
+    },
+    {
+      "table": "pub_promo_exposure",
+      "rows": 1901,
+      "bytes": 188416
+    },
+    {
+      "table": "pub_reorder_by_department",
+      "rows": 12,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_retention_tenure",
+      "rows": 72,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_rfm_segments",
+      "rows": 7,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_weekly_revenue",
+      "rows": 102,
+      "bytes": 16384
+    },
+    {
+      "table": "pub_weekly_revenue_by_dept",
+      "rows": 2442,
+      "bytes": 188416
+    }
+  ]
+}

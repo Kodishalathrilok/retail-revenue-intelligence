@@ -63,7 +63,7 @@ flowchart TD
     end
 
     subgraph HOSTED["Hosted database: reached only as role rrip_ro, SELECT only"]
-        PUB[("Published tier<br/>23 pub_* aggregate tables")]
+        PUB[("Published tier<br/>23 pub_* tables: aggregates and dimensions,<br/>no fact tables")]
     end
 
     LOCAL[("Local tier<br/>full star schema, model training,<br/>DiD estimation with statsmodels")]
@@ -89,8 +89,9 @@ flowchart TD
 Two boundaries matter. The **read-only role** is what limits generated SQL: the
 gates are a program reading SQL text, and the database role is the thing that
 cannot be talked round. The **published-tier boundary** is what limits the
-hosted demo: only aggregates are published, so the hosted database holds no
-basket-level or household-level rows to leak or to query.
+hosted demo: only aggregates and dimension tables are published, so the hosted
+database holds no transactions or baskets to leak or to query. It does hold the
+household dimension: one row per panel household, with no purchases.
 
 ## Two-minute demo
 
@@ -143,7 +144,7 @@ which were locked during model selection.
 | Rule, fixed before the test weeks were unlocked | The model replaces the baseline only if its error is lower **and** a Diebold-Mariano test finds the difference significant at p < 0.05 |
 | Gradient-boosting model | 9.86% WAPE |
 | Four-week trailing mean (the baseline) | 9.85% WAPE |
-| Diebold-Mariano p-value | 0.99 |
+| Diebold-Mariano p-value, model vs four-week trailing mean | 0.99 |
 | Decision | The baseline runs. The model stays in the repo as a measured challenger. |
 | 80% prediction interval, measured coverage | 80.8% |
 | 95% prediction interval, measured coverage | 94.7% |
@@ -202,7 +203,7 @@ and how much the model can cost.
 | Control | Setting | Its limit |
 |---|---|---|
 | **Read-only role** `rrip_ro` | `SELECT` and nothing else. 16 of 16 probes pass, 14 of the refusals from PostgreSQL itself | Bounds what can be read or changed, not how expensive a read is. Anything published is readable by design |
-| **Published-tier boundary** | The hosted database holds 23 `pub_*` aggregate tables and no fact tables | Aggregates are still data. It also means the hosted demo cannot answer row-level questions |
+| **Published-tier boundary** | The hosted database holds 23 `pub_*` tables (120,800 rows, 13.3 MB): aggregates and dimensions, no fact tables | Aggregates are still data, and the household dimension is published. It also means the hosted demo cannot answer transaction-level questions |
 | **SQL gates** | One `SELECT`, a keyword scan, a function allowlist | A program reading SQL text. It had a real bypass (`query_to_xml`), which is why the role, not the gates, is the boundary |
 | **EXPLAIN cost ceiling** | Planner cost above 5,000,000 is rejected before execution | A planner estimate, not measured work, and `EXPLAIN` never runs a function body |
 | **Timeouts** | 15 s statement timeout on generated SQL; 120 s role default; 60 s function limit | The role default can be overridden by a session, so it is defence in depth. The gates are what stop generated SQL from raising it |
@@ -257,7 +258,7 @@ tiers and the hosted one is deliberately narrower.
 
 | | Local (full pipeline) | Hosted (published tier) |
 |---|---|---|
-| Data | 39.6M rows, 3,713 MB | 23 `pub_*` aggregate tables |
+| Data | 39.6M rows, 3,713 MB | 23 `pub_*` tables, 120,800 rows, 13.3 MB |
 | Overview, segments, weekly revenue | computed from the star schema | read from the published aggregates |
 | Ask (NL→SQL) | full star schema | aggregate tables only |
 | Forecast | stored forecasts | the same stored forecasts |
@@ -325,6 +326,7 @@ here stops matching its source or a new one appears without one.
 | Local database size, published table count, stored campaigns | [`docs/deployment.md`](docs/deployment.md) |
 | NL→SQL local benchmark, router, role probes, estimator validation | [`reports/eval/latest.md`](reports/eval/latest.md) |
 | NL→SQL published benchmark, `pub-04`, `pub-09` | [`reports/eval/latest-published.json`](reports/eval/latest-published.json) |
+| Published-tier rows and size | [`reports/eval/published-tier.json`](reports/eval/published-tier.json) |
 | Forecast errors, test, coverage, departments | [`models/forecast/metadata.json`](models/forecast/metadata.json) |
 | Campaign 26 and 18 | [`reports/eval/causal-campaigns.json`](reports/eval/causal-campaigns.json) |
 | Cost ceiling, statement timeout, row cap | [`src/rrip/ai/nl2sql.py`](src/rrip/ai/nl2sql.py) |

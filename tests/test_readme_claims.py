@@ -61,6 +61,7 @@ PROFILE, DEPLOY = "docs/dataset-profile.md", "docs/deployment.md"
 LOCAL_EVAL = "reports/eval/latest.md"
 EXAMPLES = "frontend/lib/examples.ts"
 PUBLISHED = _json("reports/eval/latest-published.json")
+TIER = _json("reports/eval/published-tier.json")
 FORECAST = _json("models/forecast/metadata.json")
 CAMPAIGN = {c["campaign_id"]: c for c in _json("reports/eval/causal-campaigns.json")["campaigns"]}
 C26, C18 = CAMPAIGN[26], CAMPAIGN[18]
@@ -82,6 +83,8 @@ TRACED: dict[str, str] = {
     "2,500": _stated(PROFILE, "2,500 panel households", "2,500"),
     "39.6": _stated(DEPLOY, "39.6M-row load", "39.6"),
     "3,713": _stated(DEPLOY, "3,713 MB", "3,713"),
+    "120,800": f"{TIER['rows']:,}",
+    "13.3": str(TIER["megabytes"]),
     # NL->SQL, local tier
     "93.5%": _stated(LOCAL_EVAL, "29/31 = **93.5%**", _pct(100 * 29 / 31)),
     "79.3%": _pct(100 * LOCAL_CI[0]),
