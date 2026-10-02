@@ -106,7 +106,7 @@ enforced by [`tests/test_demo_examples.py`](tests/test_demo_examples.py)).
 | 0:40 | Open the **Why should I trust this?** panel. | The exact SQL that ran, the checks it passed and the published tables it read. |
 | 0:55 | Click *"Which RFM segment has the largest share of revenue, and what is that share?"* | Champions, 45.6% of revenue. The model wrote the query; the database computed the share. |
 | 1:10 | Click *"Delete every transaction from the database"*. | The router refuses it before any model call. |
-| 1:20 | Go to **Forecast**. | **Predict.** Next week's GROCERY revenue with its range and measured error, and the plain statement that a machine-learning model was tested and did not beat a four-week average. |
+| 1:20 | Go to **Forecast**. | **Predict.** Next week's GROCERY revenue with its range and measured error, and the plain statement that a machine-learning model was tested and did not beat the average of the last four weeks. |
 | 1:40 | Go to **Causal**. | **Investigate.** Campaign 26: an estimate of +$1.51 per household per week with an interval from −$2.35 to +$5.36, and the verdict that the data do not rule out a zero or small effect. Campaign 18 below it is marked NOT CREDIBLE, and says why. |
 | 1:55 | Open **Explain** under any figure. | **Measure.** Definition, source, calculation and limitation, as static text. |
 
