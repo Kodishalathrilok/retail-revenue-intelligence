@@ -35,13 +35,11 @@ figure, and the recorded benchmark behind each engine.
 
 | Forecast | Causal |
 |---|---|
-| ![Forecast: next-week forecast, range, measured error, history chart and how the forecast is made](docs/screenshots/forecast-desktop.png) | ![Causal: campaign effect, confidence interval, standard error, plain-English verdict and assumptions](docs/screenshots/causal-desktop.png) |
+| ![Forecast: next-week forecast, range, measured error, the two-sentence note on the machine-learning model, history chart and how the forecast is made](docs/screenshots/forecast-desktop.png) | ![Causal: campaign effect, confidence interval, standard error, plain-English verdict and assumptions](docs/screenshots/causal-desktop.png) |
 
 <img src="docs/screenshots/forecast-mobile.jpg" alt="Forecast on a phone: the headline forecast and its range" width="300">
 
-Captured on 2026-10-02. The Ask screenshot is the live demo (published tier).
-Overview, Forecast and Causal are a production build of this code against the
-local tier, which serves the same figures.
+All five were captured from the live demo (published tier) on 2026-10-02.
 
 ## Architecture
 
