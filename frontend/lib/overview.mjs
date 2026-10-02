@@ -196,6 +196,35 @@ export function displayWarning(warning) {
   return String(warning).replace(/\bthe estimate below\b/g, 'this estimate');
 }
 
+/**
+ * The challenger's forecast beside the live one, for the Forecast page.
+ *
+ * Both figures are passed through exactly as the payload gave them. The only
+ * arithmetic is the difference: challenger minus live, taken between the two
+ * amounts in whole dollars (which is how the page prints them, so the three
+ * numbers reconcile on screen), and that difference as a percentage of the
+ * live forecast.
+ *
+ * Null when there is nothing honest to show: no challenger figure, or a
+ * payload that says the challenger is the deployed predictor, in which case
+ * "not deployed" would be false.
+ * @returns {{live: number, challenger: number, difference: number,
+ *            percent: number|null, differenceText: string}|null}
+ */
+export function challengerComparison(forecast) {
+  const c = forecast?.challenger_model;
+  if (!c || c.deployed || c.prediction === null || c.prediction === undefined) return null;
+  const live = Number(forecast.prediction);
+  const challenger = Number(c.prediction);
+  if (!Number.isFinite(live) || !Number.isFinite(challenger)) return null;
+  const difference = Math.round(challenger) - Math.round(live);
+  const percent = Math.round(live) === 0 ? null : (100 * difference) / Math.round(live);
+  const pct = percent === null ? ''
+    : ` (${percent < 0 ? '−' : '+'}${Math.abs(percent).toFixed(1)}%)`;
+  return { live, challenger, difference, percent,
+           differenceText: `${signedMoney(difference, 0)}${pct}` };
+}
+
 /** A link into Ask with the question filled in. Ask never auto-runs it. */
 export function askHref(question) {
   return `/query?q=${encodeURIComponent(question)}`;

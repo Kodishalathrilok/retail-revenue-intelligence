@@ -55,7 +55,7 @@ def _metrics() -> dict[str, dict]:
 
 METRICS = _metrics()
 FORECAST_METRICS = ("forecast", "forecast_range", "forecast_error", "forecast_confidence",
-                    "forecast_method")
+                    "forecast_method", "forecast_challenger")
 CAUSAL_METRICS = ("campaign_effect", "campaign_interval", "campaign_stderr", "pretrend_test")
 
 
@@ -127,6 +127,33 @@ def test_the_method_comparison_matches_the_recorded_deployment_decision() -> Non
     scores = meta["metrics"]["test_baselines"]
     in_use = scores[meta["model_type"]]["wape"]
     assert any(v["wape"] < in_use for k, v in scores.items() if not k.startswith("__"))
+
+
+def test_the_challenger_explanation_matches_the_recorded_comparison() -> None:
+    # The entry quotes the recorded result, so it is pinned to the metadata:
+    # the page must never say more for the challenger than the test run did.
+    from rrip.forecast import train
+
+    meta = json.loads((ROOT / "models/forecast/metadata.json").read_text())
+    dep, body = meta["deployment"], METRICS["forecast_challenger"]["body"]
+    assert dep["deployed_kind"] == "baseline" and "tested, and not deployed" in body
+    assert dep["baseline"] == meta["model_type"] == "trailing_mean_4"
+    assert f"the model’s error was {dep['model_scores']['wape']:.2f}%" in body
+    assert f"four-week average’s was {dep['baseline_scores']['wape']:.2f}%" in body
+    assert (dep["model_scores"]["wape"], dep["baseline_scores"]["wape"]) == (9.8564, 9.852)
+    pairwise = meta["metrics"]["diebold_mariano_pairwise"]["model_vs_trailing_mean_4"]
+    assert dep["diebold_mariano"]["p_value"] == pairwise["p_value"] == 0.99227
+    assert ("Diebold-Mariano test of the model against the four-week trailing mean could "
+            f"not tell them apart (p = {pairwise['p_value']})") in body
+    assert meta["challenger"]["name"].startswith("hgb(") and "gradient-boosting model" in body
+    # "fitted on the training weeks" and "a ratio ... converted back to dollars".
+    assert any("trained on TRAIN weeks only" in note for note in meta["notes"])
+    source = inspect.getsource(train.run)
+    assert "MD.to_dollars(model.predict(F.feature_matrix(f))" in source
+    assert "fitted on the training weeks" in body and "converted back to dollars" in body
+    # The served interval is the live predictor's, as the entry says.
+    assert meta["conformal"]["calibrated_for"] == meta["model_type"]
+    assert "belongs to the live forecast, not to the challenger" in body
 
 
 def test_the_confidence_label_thresholds_are_the_services() -> None:
@@ -285,6 +312,58 @@ def test_the_forecast_banner_sits_under_the_cards_in_plain_words() -> None:
         assert raw in detail, f"{raw} is no longer in Technical detail"
     assert "'4-week average'" in page and "Machine-learning model (tested)" in main
     assert "one week ahead" in main
+
+
+def test_the_challenger_is_shown_beside_the_live_forecast_and_labelled_not_deployed() -> None:
+    page = _code_only(_read("app/forecast/page.tsx"))
+    assert "const CHALLENGER_LABEL = 'Challenger (not deployed)';" in page
+    note = ("Both methods were equally accurate on held-out weeks, so the simpler one is live. "
+            "The challenger is shown for comparison only.")
+    assert f"const CHALLENGER_NOTE = '{note}';" in page
+
+    # The figure shown is the payload's own challenger value: the page hands the
+    # forecast to challengerComparison, which passes that value through
+    # (frontend/lib/overview.test.mjs), and prints it with the shared formatter.
+    assert "const versus = forecast ? challengerComparison(forecast) : null;" in page
+    lib = _code_only(_read("lib/overview.mjs"))
+    assert "const challenger = Number(c.prediction);" in lib
+    assert "const c = forecast?.challenger_model;" in lib and "c.deployed" in lib
+    block = page[page.index("{versus && summary && baselineRuns && ("):]
+    block = block[:block.index("</section>")]
+    for shown in ("{fmtMoney(versus.live)}", "{fmtMoney(versus.challenger)}",
+                  "{versus.differenceText}", "{CHALLENGER_LABEL}", "{CHALLENGER_NOTE}",
+                  "{methodName(summary.model_type)}", "Machine-learning model"):
+        assert shown in block, f"the comparison lost {shown}"
+    # A table with a caption is the text alternative: there is no chart here.
+    assert "<table" in block and "<caption" in block and "<ResponsiveContainer" not in block
+    assert block.count('scope="row"') == 3 and block.count('scope="col"') == 2
+
+    # Under the banner, above the chart, and in plain names.
+    banner, comparison, chart, technical = (page.index(marker) for marker in (
+        "{BANNER_LINE}", "{versus && summary && baselineRuns && (",
+        'title="History and forecast"', '<Disclosure summary="Technical detail'))
+    assert banner < comparison < chart < technical
+    assert "challenger_model.name" not in page, "the raw name belongs in Technical detail"
+    assert not re.search(r"hgb|trailing_mean", block)
+
+
+COMPARATIVE = re.compile(
+    r"\b(better|improved?|improves|improvement|outperform\w*|superior|beats?|more accurate)\b",
+    re.I)
+NEGATED = re.compile(r"\b(not|no|never|cannot|neither|nor)\b|n[’']t", re.I)
+
+
+@pytest.mark.parametrize("path", sorted(p for d in ("app", "components", "lib") for p in (
+    FRONTEND / d).rglob("*.*") if p.suffix in {".ts", ".tsx", ".mjs"} and ".test." not in p.name),
+    ids=lambda p: p.relative_to(FRONTEND).as_posix())
+def test_nothing_says_a_method_is_better_improved_or_outperforms(path: Path) -> None:
+    # The recorded result is a tie (9.86% against 9.85%, p = 0.99227). A
+    # comparative word may appear only in a sentence that negates it, such as
+    # "did not beat" or "was not more accurate".
+    code = _code_only(path.read_text(encoding="utf-8"))
+    for sentence in re.split(r"(?<=[.!?])\s+|\n", code):
+        if COMPARATIVE.search(sentence):
+            assert NEGATED.search(sentence), f"{path.name}: {sentence.strip()[:160]}"
 
 
 def test_the_stored_pretrend_verdict_and_raw_warnings_are_never_rendered() -> None:

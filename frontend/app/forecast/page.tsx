@@ -44,6 +44,7 @@ import {
 } from '@/components/ui';
 import { Workflow } from '@/components/workflow';
 import { fmtMoney, fmtNum, get } from '@/lib/api';
+import { challengerComparison } from '@/lib/overview.mjs';
 
 type DeptItem = {
   department: string;
@@ -119,6 +120,12 @@ const dmLabel = (key: string) => key.replace(/_/g, ' ');
 // baseline was deployed, and that baseline is the four-week trailing mean.
 const BANNER_LINE = "A simple 4-week average matched the ML model's accuracy, so we deploy the simpler one.";
 
+// The challenger's figure is shown for comparison, never as the forecast. The
+// label and the sentence under the table are fixed, and both are shown only
+// while the model card says the baseline is the deployed predictor.
+const CHALLENGER_LABEL = 'Challenger (not deployed)';
+const CHALLENGER_NOTE = 'Both methods were equally accurate on held-out weeks, so the simpler one is live. The challenger is shown for comparison only.';
+
 // The forecast and its range are drawn only where the predictor was not
 // fitted: the held-out test weeks and the future week. An in-sample fit is
 // not evidence of forecast accuracy.
@@ -189,6 +196,8 @@ export default function ForecastPage() {
   const challenger = summary?.metrics.test_baselines[CHALLENGER];
   const baselineRuns = summary?.deployed_kind === 'baseline';
   const dmTests = Object.entries(summary?.metrics.diebold_mariano_pairwise ?? {});
+  // Null unless the payload carries a challenger figure that is not deployed.
+  const versus = forecast ? challengerComparison(forecast) : null;
 
   return (
     <div className="space-y-8">
@@ -278,6 +287,62 @@ export default function ForecastPage() {
               </Callout>
             )}
 
+            {/* The model's own figure for the same week, beside the live one.
+                A table rather than a chart: three numbers, readable by a
+                screen reader as they stand. */}
+            {versus && summary && baselineRuns && (
+              <section aria-labelledby={`${id}-challenger`}
+                       className="rounded-card border border-rule bg-paper p-4">
+                <h3 id={`${id}-challenger`} className="text-sm font-semibold text-ink">
+                  The live forecast and the challenger
+                </h3>
+                <table className="mt-2 w-full text-sm">
+                  <caption className="sr-only">
+                    {forecast.department}, week {forecast.forecast_week}: the live forecast, the
+                    machine-learning model’s forecast, and the difference between them
+                  </caption>
+                  <thead className="text-xs uppercase tracking-wide text-muted">
+                    <tr>
+                      <th scope="col" className="pb-1 text-left font-medium">Method</th>
+                      <th scope="col" className="pb-1 text-right font-medium">
+                        Week {forecast.forecast_week} forecast
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-t border-rule">
+                      <th scope="row" className="py-2 pr-3 text-left font-medium text-ink">
+                        {methodName(summary.model_type)}
+                        <span className="block text-xs font-normal text-muted">Live forecast</span>
+                      </th>
+                      <td className="py-2 text-right text-base font-semibold tabular-nums text-ink">
+                        {fmtMoney(versus.live)}
+                      </td>
+                    </tr>
+                    <tr className="border-t border-rule">
+                      <th scope="row" className="py-2 pr-3 text-left font-medium text-ink">
+                        Machine-learning model
+                        <span className="block text-xs font-normal text-muted">{CHALLENGER_LABEL}</span>
+                      </th>
+                      <td className="py-2 text-right text-base tabular-nums text-ink-2">
+                        {fmtMoney(versus.challenger)}
+                      </td>
+                    </tr>
+                    <tr className="border-t border-rule">
+                      <th scope="row" className="py-2 pr-3 text-left font-medium text-ink">
+                        Difference
+                        <span className="block text-xs font-normal text-muted">challenger minus live</span>
+                      </th>
+                      <td className="py-2 text-right text-base tabular-nums text-ink-2">
+                        {versus.differenceText}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p className="mt-3 max-w-[65ch] text-sm text-ink-2">{CHALLENGER_NOTE}</p>
+              </section>
+            )}
+
             <div className="flex flex-wrap items-center gap-3">
               <Badge tone={CONFIDENCE_TONE[forecast.confidence] ?? 'neutral'}>
                 Confidence: {forecast.confidence}
@@ -299,7 +364,7 @@ export default function ForecastPage() {
               </ul>
             )}
 
-            <Explain metrics={['forecast', 'forecast_range', 'forecast_error', 'forecast_confidence', 'forecast_method']}
+            <Explain metrics={['forecast', 'forecast_range', 'forecast_error', 'forecast_confidence', 'forecast_method', 'forecast_challenger']}
                      notes={{
                        forecast: forecast.caveats,
                        forecast_range: [

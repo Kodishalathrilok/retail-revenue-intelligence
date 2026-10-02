@@ -3,8 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_FORECAST_DEPARTMENT, ENROLMENT_FLOOR_WEEK, STEPS, askHref, campaignVerdict,
-  displayWarning, driversQuestion, effectSummary, flaggedSummary, forecastDepartment,
-  latestFullWeek, peakWeek, pretrendSentence, signedMoney, splitFlagged, weekList, weeklyAlt,
+  challengerComparison, displayWarning, driversQuestion, effectSummary, flaggedSummary,
+  forecastDepartment, latestFullWeek, peakWeek, pretrendSentence, signedMoney, splitFlagged,
+  weekList, weeklyAlt,
 } from './overview.mjs';
 import { METRICS, metric } from './metrics.mjs';
 
@@ -184,6 +185,63 @@ test('no Explain text uses a ruled-out phrasing', () => {
     const text = claims([m.label, m.definition, m.source, m.calculation, m.limitation].join(' '));
     for (const pattern of RULED_OUT) assert.doesNotMatch(text, pattern, key);
   }
+});
+
+// The forecast payload production returns for GROCERY, week 102 (the fields used).
+const GROCERY = { prediction: 49031.5,
+  challenger_model: { name: 'hgb(lr=0.02,leaves=7,min_leaf=40)', prediction: 48194.26, deployed: false } };
+
+test('the challenger figure shown is the payload value, untouched', () => {
+  const c = challengerComparison(GROCERY);
+  assert.equal(c.challenger, GROCERY.challenger_model.prediction);
+  assert.equal(c.live, GROCERY.prediction);
+});
+
+test('the difference is challenger minus live, and reconciles with the two figures as printed', () => {
+  const c = challengerComparison(GROCERY);
+  // Printed in whole dollars: $49,032 live and $48,194 challenger.
+  assert.equal(c.difference, 48194 - 49032);
+  assert.equal(c.differenceText, '−$838 (−1.7%)');
+  const higher = challengerComparison({ prediction: 100, challenger_model: { prediction: 227.6, deployed: false } });
+  assert.equal(higher.differenceText, '+$128 (+128.0%)');
+  const zero = challengerComparison({ prediction: 0, challenger_model: { prediction: 5, deployed: false } });
+  assert.equal(zero.percent, null);
+  assert.equal(zero.differenceText, '+$5');
+});
+
+test('no comparison is offered when it would be untrue or empty', () => {
+  // A deployed challenger is not "not deployed".
+  assert.equal(challengerComparison({ ...GROCERY,
+    challenger_model: { ...GROCERY.challenger_model, deployed: true } }), null);
+  assert.equal(challengerComparison({ prediction: 5, challenger_model: { prediction: null, deployed: false } }), null);
+  assert.equal(challengerComparison({ prediction: 5 }), null);
+  assert.equal(challengerComparison(null), null);
+});
+
+// Words that would say one method is the more accurate. Allowed only inside a
+// sentence that negates them ("did not beat", "was not more accurate").
+const COMPARATIVE = /\b(better|improved?|improves|improvement|outperform\w*|superior|beats?|more accurate)\b/i;
+const NEGATED = /\b(not|no|never|cannot|neither|nor)\b|n’t|n't/i;
+
+test('no forecast Explain text says the model is better, improved or outperforms', () => {
+  for (const [key, m] of Object.entries(METRICS)) {
+    if (!key.startsWith('forecast')) continue;
+    const text = [m.label, m.definition, m.source, m.calculation, m.limitation].join(' ');
+    for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+      if (COMPARATIVE.test(sentence)) assert.match(sentence, NEGATED, `${key}: ${sentence}`);
+    }
+  }
+  // The scan has teeth.
+  assert.ok(COMPARATIVE.test('The model outperforms the average.'));
+  assert.ok(!NEGATED.test('The model outperforms the average.'));
+});
+
+test('the challenger Explain entry says what it is and what it is not', () => {
+  const m = METRICS.forecast_challenger;
+  assert.match(m.definition, /tested, and not deployed/);
+  assert.match(m.limitation, /not the live forecast/);
+  assert.match(m.limitation, /not more accurate than the live method/);
+  assert.match(m.limitation, /range on this page belongs to the live forecast/);
 });
 
 test('ask links carry the question and the drivers question names the week', () => {
