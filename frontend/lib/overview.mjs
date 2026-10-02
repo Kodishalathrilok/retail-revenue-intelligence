@@ -230,11 +230,21 @@ export function askHref(question) {
   return `/query?q=${encodeURIComponent(question)}`;
 }
 
-/** The "explore drivers" question for one week. Verified against the
- *  published tier: it reads pub_weekly_revenue_by_dept. */
+/**
+ * The "explore drivers" question for one week, pre-filled by the Overview's
+ * link into Ask.
+ *
+ * It is NOT a verified demo question. It has no benchmark case and no recorded
+ * production run, unlike the prompts in lib/examples.ts, and this comment used
+ * to say otherwise. The Overview keeps the link, because it is the Detect to
+ * Explain handoff, and prints DRIVERS_QUESTION_NOTE beside it.
+ */
 export function driversQuestion(weekNo) {
   return `Which 5 departments had the highest revenue in week ${weekNo}?`;
 }
+
+/** Shown beside the link that pre-fills driversQuestion. */
+export const DRIVERS_QUESTION_NOTE = 'Not a verified demo question.';
 
 /** The department whose forecast the Overview shows. */
 export function forecastDepartment(chosen, servable) {

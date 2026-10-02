@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_FORECAST_DEPARTMENT, ENROLMENT_FLOOR_WEEK, STEPS, askHref, campaignVerdict,
+  DEFAULT_FORECAST_DEPARTMENT, DRIVERS_QUESTION_NOTE, ENROLMENT_FLOOR_WEEK, STEPS, askHref,
+  campaignVerdict,
   challengerComparison, displayWarning, driversQuestion, effectSummary, flaggedSummary,
   forecastDepartment, latestFullWeek, peakWeek, pretrendSentence, signedMoney, splitFlagged,
   weekList, weeklyAlt,
@@ -246,6 +247,8 @@ test('the challenger Explain entry says what it is and what it is not', () => {
 
 test('ask links carry the question and the drivers question names the week', () => {
   assert.equal(driversQuestion(92), 'Which 5 departments had the highest revenue in week 92?');
+  // The question is pre-filled, never auto-run, and labelled where it is offered.
+  assert.equal(DRIVERS_QUESTION_NOTE, 'Not a verified demo question.');
   assert.equal(askHref('a b?'), '/query?q=a%20b%3F');
 });
 

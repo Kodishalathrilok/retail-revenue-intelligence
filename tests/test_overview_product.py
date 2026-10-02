@@ -261,6 +261,38 @@ def test_the_overview_hands_off_to_ask_with_verified_questions() -> None:
     assert "/forecast?department=" in page and 'href="/causal"' in page
 
 
+def test_the_week_link_says_its_question_is_not_a_verified_demo_question() -> None:
+    # "Ask what drove week N" pre-fills a question with no benchmark case and no
+    # recorded production run. The link stays -- it is the Detect to Explain
+    # handoff -- and the page says what it is. A code comment used to claim the
+    # question was verified.
+    lib_source = _read("lib/overview.mjs")
+    lib = _code_only(lib_source)
+    assert "export const DRIVERS_QUESTION_NOTE = 'Not a verified demo question.';" in lib
+    template = re.search(
+        r"return `(Which 5 departments had the highest revenue in week )\$\{weekNo\}\?`", lib)
+    assert template, "the pre-filled question changed; re-check whether it is verified"
+
+    # The note sits directly beside the link, in the same wrapping row, so it
+    # stays attached to the link on a phone.
+    page = _code_only(_read("app/page.tsx"))
+    row = page[page.index('<div className="flex flex-wrap items-center gap-x-3 gap-y-2">'):]
+    row = row[:row.index("</div>")]
+    link = row.index("<ActionLink primary href={askHref(driversQuestion(peak.week_no))}>")
+    note = row.index('<span className="text-sm text-muted">{DRIVERS_QUESTION_NOTE}</span>')
+    assert link < note and "Ask what drove week {peak.week_no}" in row[link:note]
+
+    # It really is unverified: not on the verified list, and no benchmark case.
+    verified = re.findall(r'question:\s*"([^"]+)"', _read("lib/examples.ts"))
+    assert verified and not any(q.startswith(template.group(1)) for q in verified)
+    cases = (ROOT / "src/rrip/eval/cases.py").read_text(encoding="utf-8")
+    assert "highest revenue in week" not in cases
+
+    # And nothing claims otherwise any more.
+    assert "NOT a verified demo question" in lib_source
+    assert not re.search(r"(?i)verified against the\s+\*?\s*published tier", lib_source)
+
+
 # --- Forecast and Causal: business-readable, and no overclaiming -------------------
 
 def _explained(route: str) -> list[str]:

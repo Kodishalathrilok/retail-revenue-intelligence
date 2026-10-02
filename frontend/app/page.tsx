@@ -27,8 +27,8 @@ import { Workflow } from '@/components/workflow';
 import { fmtMoney, fmtNum, get } from '@/lib/api';
 import { EXAMPLES } from '@/lib/examples';
 import {
-  ENROLMENT_FLOOR_WEEK, STEPS, askHref, displayWarning, driversQuestion, flaggedSummary,
-  forecastDepartment, latestFullWeek, peakWeek, pretrendSentence,
+  DRIVERS_QUESTION_NOTE, ENROLMENT_FLOOR_WEEK, STEPS, askHref, displayWarning, driversQuestion,
+  flaggedSummary, forecastDepartment, latestFullWeek, peakWeek, pretrendSentence,
 } from '@/lib/overview.mjs';
 
 type Totals = {
@@ -185,11 +185,16 @@ export default function OverviewPage() {
               <ErrorState error={anomalies.error} what="the flagged weeks" onRetry={retry} />
             )}
 
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               {peak && !dept ? (
-                <ActionLink primary href={askHref(driversQuestion(peak.week_no))}>
-                  Ask what drove week {peak.week_no}
-                </ActionLink>
+                <>
+                  <ActionLink primary href={askHref(driversQuestion(peak.week_no))}>
+                    Ask what drove week {peak.week_no}
+                  </ActionLink>
+                  {/* The link pre-fills a question with no benchmark case behind
+                      it, so it says so. The verified prompts are on the Ask page. */}
+                  <span className="text-sm text-muted">{DRIVERS_QUESTION_NOTE}</span>
+                </>
               ) : (
                 <ActionLink primary href="/query">Ask about this</ActionLink>
               )}
