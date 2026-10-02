@@ -300,8 +300,7 @@ export default function ForecastPage() {
                                  margin={{ top: 16, right: 10, bottom: 5, left: 0 }}>
                     <CartesianGrid {...GRID_PROPS} />
                     <XAxis dataKey="week" tick={AXIS_TICK}
-                           label={{ value: 'week', position: 'insideBottom',
-                                    offset: -3, fontSize: 11, fill: CHART.axis }} />
+                           tickFormatter={(w) => `wk ${w}`} minTickGap={12} />
                     <YAxis tick={AXIS_TICK}
                            tickFormatter={(v) => fmtNum(v)} width={56} />
                     <Tooltip
