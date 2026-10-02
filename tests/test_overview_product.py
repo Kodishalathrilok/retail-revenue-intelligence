@@ -326,6 +326,17 @@ def test_every_chart_on_the_engine_pages_has_its_figures_as_a_table(route: str) 
 
 # --- design consistency and accessibility ----------------------------------------
 
+@pytest.mark.parametrize("path", sorted(p for d in ("app", "components", "lib") for p in (
+    FRONTEND / d).rglob("*.*") if p.suffix in {".ts", ".tsx", ".mjs"} and ".test." not in p.name),
+    ids=lambda p: p.relative_to(FRONTEND).as_posix())
+def test_numbers_are_formatted_in_one_locale(path: Path) -> None:
+    # Formatting in the visitor's locale showed the busiest week as "$1,13,193"
+    # in its card and "$113,193" in the chart's text. Every formatter names en-US.
+    code = _code_only(path.read_text(encoding="utf-8"))
+    for call in re.findall(r"(?:toLocaleString|NumberFormat)\(([^,)]*)", code):
+        assert call.strip() == "'en-US'", f"locale-dependent formatting in {path.name}"
+
+
 @pytest.mark.parametrize("path", UI_SOURCES, ids=lambda p: p.relative_to(FRONTEND).as_posix())
 def test_no_raw_palette_classes_or_hex_colours(path: Path) -> None:
     code = _code_only(path.read_text(encoding="utf-8"))
