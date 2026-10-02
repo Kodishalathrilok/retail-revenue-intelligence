@@ -1,0 +1,74 @@
+{
+  "recorded_at": "2026-10-02T05:07:53+00:00",
+  "tier": "local",
+  "source": "GET /api/v1/causal/analysis/{campaign_id} on the local tier (live estimation by rrip.ai.causal)",
+  "note": "The published tier serves the same figures precomputed from pub_causal_results. The pre-period series is omitted here; the endpoint returns it.",
+  "campaigns": [
+    {
+      "campaign_id": 26,
+      "treated_n": 310,
+      "control_n": 2140,
+      "contaminated_pct": 6.6,
+      "naive_difference": 6.5257,
+      "did_estimate": 1.5068,
+      "did_stderr": 1.9675,
+      "did_pvalue": 0.4438,
+      "ci_low": -2.3494,
+      "ci_high": 5.363,
+      "adjusted_estimate": 0.451,
+      "adjusted_stderr": 1.8727,
+      "confounders_used": [
+        "pre_spend",
+        "pre_baskets",
+        "coupon_offers",
+        "has_demographics"
+      ],
+      "parallel_trends": {
+        "passed": true,
+        "treated_slope": 0.0527,
+        "control_slope": 0.3002,
+        "interaction_pvalue": 0.3875,
+        "pre_weeks": 27,
+        "verdict": "The pre-period test did not reject parallel trends (interaction p = 0.388). This is a low-power linear test, so it is consistent with parallel trends but does not prove them."
+      },
+      "confidence": "WEAK",
+      "warnings": [
+        "the DiD estimate is not statistically distinguishable from zero (p = 0.444)."
+      ]
+    },
+    {
+      "campaign_id": 18,
+      "treated_n": 104,
+      "control_n": 933,
+      "contaminated_pct": 90.8,
+      "naive_difference": 0.3671,
+      "did_estimate": -5.3455,
+      "did_stderr": 3.351,
+      "did_pvalue": 0.1107,
+      "ci_low": -11.9133,
+      "ci_high": 1.2224,
+      "adjusted_estimate": -6.5119,
+      "adjusted_stderr": 3.2259,
+      "confounders_used": [
+        "pre_spend",
+        "pre_baskets",
+        "coupon_offers",
+        "has_demographics"
+      ],
+      "parallel_trends": {
+        "passed": false,
+        "treated_slope": -0.1485,
+        "control_slope": 0.2503,
+        "interaction_pvalue": 0.0118,
+        "pre_weeks": 26,
+        "verdict": "Pre-period trends DIVERGE (interaction p = 0.0118). Parallel trends is VIOLATED and the DiD estimate is not attributable to the campaign."
+      },
+      "confidence": "NOT CREDIBLE",
+      "warnings": [
+        "PARALLEL TRENDS VIOLATED -- the groups were already diverging before the campaign, so the estimate below cannot be attributed to it.",
+        "90.8% of enrolled households were simultaneously in an overlapping campaign; this measures a bundle, not this campaign.",
+        "the DiD estimate is not statistically distinguishable from zero (p = 0.111)."
+      ]
+    }
+  ]
+}
