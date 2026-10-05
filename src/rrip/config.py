@@ -3,7 +3,7 @@
 from datetime import date
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -98,6 +98,21 @@ class Settings(BaseSettings):
     # rrip.api.queries.
     tier: str = Field(default="local", alias="RRIP_TIER")
 
+    @field_validator("tier")
+    @classmethod
+    def _known_tier(cls, v: str) -> str:
+        """A typo in RRIP_TIER must fail loudly, not silently mean 'local'.
+
+        `is_published` tests `tier == "published"`, so "publish" or "Published "
+        would read as local -- and on a public deployment local means the
+        limiter is off (see rrip.api.limits.mode). Fail at startup instead.
+        """
+        t = v.strip().lower()
+        if t not in ("local", "published"):
+            raise ValueError(
+                f"RRIP_TIER must be 'local' or 'published', got {v!r}")
+        return t
+
     # Browser origins allowed to call the API, comma-separated.
     #
     # Configurable because the deployed frontend is on a different origin than
@@ -118,6 +133,11 @@ class Settings(BaseSettings):
     ai_rate_limit: int = Field(default=10, ge=1, alias="RRIP_AI_RATE_LIMIT")
     ai_rate_window_seconds: int = Field(default=60, ge=1,
                                         alias="RRIP_AI_RATE_WINDOW_SECONDS")
+    # Per-client allowance across a whole UTC day, counted in the same table as
+    # the per-minute limit. The global llm_daily_cap below bounds total spend;
+    # this stops one address spending most of it -- at 10/min the per-minute
+    # limit alone lets one client reach the 300 global cap in about 15 minutes.
+    ai_daily_per_ip: int = Field(default=60, ge=1, alias="RRIP_AI_DAILY_PER_IP")
     llm_daily_cap: int = Field(default=300, ge=0, alias="RRIP_LLM_DAILY_CAP")
     # Header carrying the client IP, trusted ONLY when set. Behind Vercel use
     # x-vercel-forwarded-for, which the platform sets itself; anywhere a client can reach the

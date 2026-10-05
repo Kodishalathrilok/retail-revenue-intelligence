@@ -18,7 +18,13 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from rrip.ai.provider import CallRefused, FakeProvider, LLMError, LLMProvider
+from rrip.ai.provider import (
+    CallRefused,
+    FakeProvider,
+    LLMError,
+    LLMProvider,
+    NonRetryable,
+)
 from rrip.api import limits
 from rrip.api.main import app
 from rrip.config import settings
@@ -184,7 +190,7 @@ async def _no_sleep(*_):
 def test_a_cache_hit_is_not_charged(monkeypatch) -> None:
     p = _Flaky()
     n, p.budget = _counting_budget()
-    monkeypatch.setattr(p, "_read_cache", lambda prompt, system: "cached")
+    monkeypatch.setattr(p, "_read_cache", lambda prompt, system, model: "cached")
     assert asyncio.run(p.complete("q")).cached
     assert n["charged"] == 0 and p.calls == 0
 
@@ -207,6 +213,108 @@ def test_guarded_provider_is_rationed_only_when_protection_is_on(monkeypatch) ->
     assert limits.guarded_provider("fake").budget is None
     monkeypatch.setattr(settings, "limiter_dsn", "host=x")
     assert limits.guarded_provider("fake").budget is limits.charge_llm_call
+
+
+def test_guarded_provider_caps_attempts_for_the_function_time_limit() -> None:
+    # The CLI default is 4; API traffic gets 2, so retries fit in 60 s and the
+    # daily cap is charged at most twice per request.
+    assert limits.guarded_provider("fake").max_retries == 2
+    assert FakeProvider().max_retries == 4
+
+
+# --- the retry loop: bounded, and honest about what it charges ------------------
+
+class _AlwaysFails(LLMProvider):
+    name, model = "af", "af-1"
+
+    def __init__(self) -> None:
+        super().__init__(api_key="k", use_cache=False)
+        self.calls = 0
+
+    async def _call(self, prompt, system, temperature):
+        self.calls += 1
+        raise LLMError("transient")
+
+
+def test_complete_makes_exactly_max_retries_attempts(monkeypatch) -> None:
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    p = _AlwaysFails()
+    p.max_retries = 2
+    with pytest.raises(LLMError):
+        asyncio.run(p.complete("q"))
+    assert p.calls == 2
+
+
+class _NonRetryable(LLMProvider):
+    name, model = "nr", "nr-1"
+
+    def __init__(self) -> None:
+        super().__init__(api_key="k", use_cache=False)
+        self.calls = 0
+
+    async def _call(self, prompt, system, temperature):
+        self.calls += 1
+        raise NonRetryable("gemini returned 400")
+
+
+def test_a_non_retryable_failure_is_not_retried(monkeypatch) -> None:
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    p = _NonRetryable()
+    p.max_retries = 4
+    with pytest.raises(NonRetryable):
+        asyncio.run(p.complete("q"))
+    assert p.calls == 1, "a 4xx / truncation must not be retried"
+
+
+class _ModelRewriter(LLMProvider):
+    """Mimics Gemini rewriting self.model to the fallback that answered."""
+
+    name, model = "rw", "primary"
+
+    async def _call(self, prompt, system, temperature):
+        self.model = "fallback-model"
+        return "answer"
+
+
+def test_cache_key_is_stable_across_a_model_fallback(tmp_path, monkeypatch) -> None:
+    from rrip.ai import provider as P
+
+    monkeypatch.setattr(P, "CACHE_DIR", tmp_path)
+    writer = _ModelRewriter(api_key="k", use_cache=True)
+    assert asyncio.run(writer.complete("q", system="s")).text == "answer"
+    # A fresh provider (self.model back to "primary") must find the cached
+    # answer -- the key was written under the model asked, not the fallback.
+    reader = _ModelRewriter(api_key="k", use_cache=True)
+    resp = asyncio.run(reader.complete("q", system="s"))
+    assert resp.cached and resp.text == "answer"
+
+
+# --- the per-client daily allowance ---------------------------------------------
+
+def test_per_ip_daily_allowance_is_counted_and_refuses(monkeypatch, protection_on) -> None:
+    monkeypatch.setattr(settings, "ai_daily_per_ip", 5)
+    seen: list[str] = []
+
+    async def fake_one(sql, params):
+        seen.append(params["key"])
+        # per-minute bucket fine; per-day bucket over its allowance of 5.
+        return (1 if params["key"].startswith("ip:") else 6, 3600)
+
+    async def noclean(at):
+        return None
+
+    monkeypatch.setattr(limits, "_one", fake_one)
+    monkeypatch.setattr(limits, "_cleanup", noclean)
+    with pytest.raises(limits.RateLimitExceeded) as exc:
+        asyncio.run(limits.protect(_request({"origin": PROD})))
+    assert "00:00 UTC" in exc.value.public_message
+    assert any(k.startswith("ip:") for k in seen) and any(k.startswith("ipd:") for k in seen)
+
+
+def test_minute_and_day_buckets_are_distinct_keys() -> None:
+    minute = limits.bucket_key("203.0.113.7", "ip")
+    day = limits.bucket_key("203.0.113.7", "ipd")
+    assert minute != day and minute.startswith("ip:") and day.startswith("ipd:")
 
 
 # --- through the real app ----------------------------------------------------------

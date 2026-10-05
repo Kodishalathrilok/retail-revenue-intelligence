@@ -102,7 +102,10 @@ def test_explain_is_opt_in_and_never_calls_a_model() -> None:
 def test_the_flag_threshold_in_explain_is_the_apis_default() -> None:
     from rrip.api.ai_routes import anomalies
 
-    default = inspect.signature(anomalies).parameters["z_threshold"].default
+    # z_threshold now carries FastAPI Query bounds, so its signature default is
+    # a Query object whose .default holds the value; a plain float has none.
+    param = inspect.signature(anomalies).parameters["z_threshold"].default
+    default = getattr(param, "default", param)
     assert f"at least {default} " in METRICS["flagged_weeks"]["body"]
 
 
