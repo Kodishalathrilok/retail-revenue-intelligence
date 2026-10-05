@@ -202,9 +202,9 @@ and how much the model can cost.
 |---|---|---|
 | **Read-only role** `rrip_ro` | `SELECT` and nothing else. 16 of 16 probes pass, 14 of the refusals from PostgreSQL itself | Bounds what can be read or changed, not how expensive a read is. Anything published is readable by design |
 | **Published-tier boundary** | The hosted database holds 23 `pub_*` tables (120,800 rows, 13.3 MB): aggregates and dimensions, no fact tables | Aggregates are still data, and the household dimension is published. It also means the hosted demo cannot answer transaction-level questions |
-| **SQL gates** | One `SELECT`, a keyword scan, a function allowlist | A program reading SQL text. It had a real bypass (`query_to_xml`), which is why the role, not the gates, is the boundary |
+| **SQL gates** | One `SELECT`, a keyword scan, a function allowlist | A program reading SQL text. It had a real bypass (`query_to_xml`), which is why the role, not the gates, is the boundary. Generated SQL runs over the extended query protocol, so PostgreSQL itself refuses a second statement even if a text scan is evaded |
 | **EXPLAIN cost ceiling** | Planner cost above 5,000,000 is rejected before execution | A planner estimate, not measured work, and `EXPLAIN` never runs a function body |
-| **Timeouts** | 15 s statement timeout on generated SQL; 120 s role default; 60 s function limit | The role default can be overridden by a session, so it is defence in depth. The gates are what stop generated SQL from raising it |
+| **Timeouts** | 15 s statement timeout on generated SQL; 120 s role default; 60 s function limit | The role default can be overridden by a session, so it is defence in depth. A generated query cannot raise it: a second statement is rejected by the shape gate, and by the extended protocol under it |
 | **Row cap** | 5,000 rows; a result that reaches the cap is rejected, not silently truncated | Caps what comes back, not what is scanned |
 | **Rate limit** | 10 AI requests per client per 60 s, counted in Postgres | Per IP address: clients behind one address share an allowance, and many addresses each get their own |
 | **Daily LLM cap** | 300 model calls per UTC day for the whole deployment | A cost ceiling, not fairness. One heavy user can spend it for everyone until the next UTC day |

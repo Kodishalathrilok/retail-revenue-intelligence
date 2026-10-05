@@ -70,6 +70,10 @@ WRITE_PROBES: tuple[tuple[str, str, str], ...] = (
      "CREATE TABLE rrip_ro_probe (id int)"),
     ("create_function", "CREATE FUNCTION in public",
      "CREATE FUNCTION rrip_ro_probe_fn() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql"),
+    # A temporary table on a pooled connection shadows a real one for later
+    # requests. 60_readonly_role.sql revokes TEMPORARY; this is what checks it.
+    ("create_temp_table", "CREATE a temporary table",
+     "CREATE TEMP TABLE rrip_ro_tmp_probe (id int)"),
     ("drop", "DROP a table", "DROP TABLE IF EXISTS {dim}"),
     ("alter_role", "ALTER own role to superuser", f"ALTER ROLE {ROLE} SUPERUSER"),
     # The bypass that defeated the text gates, in both directions.

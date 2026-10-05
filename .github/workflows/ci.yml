@@ -139,7 +139,7 @@ jobs:
           RRIP_PG_READONLY_DSN: postgresql://rrip_ro:ci-readonly@localhost:5432/rrip
           RRIP_REQUIRE_RO_DB: "1"
         run: |
-          pytest -q tests/test_readonly_role.py tests/test_db_pool.py
+          pytest -q tests/test_readonly_role.py tests/test_db_pool.py tests/test_nl2sql_db.py
           python -m rrip.cli verify-role
 
       - name: Quality check definitions are well-formed

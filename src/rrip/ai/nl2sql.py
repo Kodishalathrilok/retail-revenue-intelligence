@@ -61,9 +61,16 @@ MAX_ROWS = 5_000
 # Rejected outright. Checked against the SQL with comments and string literals
 # stripped, so a keyword inside a quoted string cannot trigger a false reject
 # and a comment cannot hide one.
+#
+# `into` is here for SELECT ... INTO: it creates a table from a query result,
+# and SELECT ... INTO TEMP t makes a session-local one. On a pooled connection
+# that temp table then shadows the real t for every later request on that
+# connection -- a way to change what other visitors are shown with no write
+# privilege on any base table. The role also revokes TEMPORARY (see
+# sql/ddl/60_readonly_role.sql); this is the gate in front of that.
 FORBIDDEN = (
     "insert", "update", "delete", "drop", "truncate", "alter", "create",
-    "grant", "revoke", "vacuum", "analyze", "copy", "call", "do",
+    "grant", "revoke", "vacuum", "analyze", "copy", "call", "do", "into",
     "pg_read_file", "pg_write", "pg_ls_dir", "lo_import", "lo_export",
     "dblink", "pg_sleep", "set_config", "pg_terminate", "pg_cancel",
 )
@@ -128,6 +135,11 @@ NON_CALL_KEYWORDS = frozenset({
 })
 
 CALL_RE = re.compile(r"([a-z_][a-z0-9_$]*)\s*\(", re.IGNORECASE)
+
+# A dollar-quote tag: $$ or $tag$. Matched against RAW SQL both to neutralise
+# the literal in strip_sql_noise and to reject it outright in validate_shape --
+# this schema's analytics never need one, and it is a lexer-desync vector.
+DOLLAR_TAG_RE = re.compile(r"\$[A-Za-z_]*\$")
 
 # `WITH name AS (`, `WITH name(cols) AS (`, and the same after a comma. These
 # names are call-shaped when a column list follows, so they are collected and
@@ -300,33 +312,102 @@ class NL2SQLResult:
     routing: dict | None = None
 
 
+def _scan_standard_string(sql: str, i: int, n: int) -> int:
+    """sql[i] opens a '...' literal; '' escapes a quote. Index after the close."""
+    j = i + 1
+    while j < n:
+        if sql[j] == "'":
+            if j + 1 < n and sql[j + 1] == "'":
+                j += 2
+                continue
+            return j + 1
+        j += 1
+    return n
+
+
+def _scan_escape_string(sql: str, i: int, n: int) -> int:
+    """sql[i] opens an E'...' literal, where a backslash escapes the next char.
+
+    Postgres closes E'\\'' after the escaped quote; the old scanner, which knew
+    only the '' escape, ran on to the next quote and swallowed a `'; DROP ...`
+    that followed into what it returned as one statement.
+    """
+    j = i + 1
+    while j < n:
+        if sql[j] == "\\":
+            j += 2
+            continue
+        if sql[j] == "'":
+            if j + 1 < n and sql[j + 1] == "'":
+                j += 2
+                continue
+            return j + 1
+        j += 1
+    return n
+
+
+def _scan_quoted_identifier(sql: str, i: int, n: int) -> tuple[str, int]:
+    """sql[i] opens a "..." identifier; "" escapes a quote.
+
+    Returns the identifier's name with every non-word character replaced, and
+    the index after the close. Keeping the name -- rather than blanking it like
+    a string literal -- is deliberate: "query_to_xml"(...) must still read as a
+    call so the function allowlist sees it, and a quote inside the name ("'")
+    must not be left to desync the scan.
+    """
+    j, chars = i + 1, []
+    while j < n:
+        if sql[j] == '"':
+            if j + 1 < n and sql[j + 1] == '"':
+                chars.append('"')
+                j += 2
+                continue
+            j += 1
+            break
+        chars.append(sql[j])
+        j += 1
+    name = re.sub(r"[^A-Za-z0-9_$]", "_", "".join(chars))
+    return name or "_", j
+
+
 def strip_sql_noise(sql: str) -> str:
     """Remove comments and string literals so keyword checks see only code.
 
     Without this, `WHERE name = 'drop table'` would be rejected and
     `SELECT 1 -- ; DROP TABLE x` could hide a statement separator.
+
+    The scanner must end each literal where PostgreSQL's lexer does, or a
+    `'; DROP ...` can hide inside what this returns as a single statement. It
+    now recognises every literal form Postgres accepts: '...', E'...' (backslash
+    escapes), and $tag$...$tag$. Quoted "..." identifiers keep their (sanitised)
+    name so a quoted function call is still visible to the function gate.
     """
     out, i, n = [], 0, len(sql)
     while i < n:
+        ch = sql[i]
         if sql.startswith("--", i):
             j = sql.find("\n", i)
             i = n if j == -1 else j
         elif sql.startswith("/*", i):
             j = sql.find("*/", i + 2)
             i = n if j == -1 else j + 2
-        elif sql[i] == "'":
-            j = i + 1
-            while j < n:
-                if sql[j] == "'":
-                    if j + 1 < n and sql[j + 1] == "'":
-                        j += 2
-                        continue
-                    break
-                j += 1
+        elif ch == "$" and (m := DOLLAR_TAG_RE.match(sql, i)):
+            tag = m.group(0)
+            close = sql.find(tag, i + len(tag))
+            i = n if close == -1 else close + len(tag)
             out.append("''")
-            i = j + 1
+        elif ch in "eE" and i + 1 < n and sql[i + 1] == "'" and not (
+                i > 0 and (sql[i - 1].isalnum() or sql[i - 1] == "_")):
+            i = _scan_escape_string(sql, i + 1, n)
+            out.append("''")
+        elif ch == "'":
+            i = _scan_standard_string(sql, i, n)
+            out.append("''")
+        elif ch == '"':
+            name, i = _scan_quoted_identifier(sql, i, n)
+            out.append(name)
         else:
-            out.append(sql[i])
+            out.append(ch)
             i += 1
     return "".join(out)
 
@@ -374,6 +455,19 @@ def validate_shape(sql: str) -> Stage:
         return Stage("shape", False,
                      "WITH RECURSIVE is not allowed -- recursive CTEs cannot be "
                      "cost-bounded; express the query without recursion", ms)
+
+    # Raw-SQL rejections for the two forms whose job is to desync a text
+    # scanner. Analytics on this schema need neither, so rejecting them outright
+    # gives a clear message rather than relying on the literal-stripping to
+    # neutralise them and the extended protocol to refuse what gets through.
+    if "\\" in sql:
+        return Stage("shape", False,
+                     "backslash is not allowed -- this schema's queries need no "
+                     "escape strings", ms)
+    if DOLLAR_TAG_RE.search(sql):
+        return Stage("shape", False,
+                     "dollar-quoted strings are not allowed -- use ordinary "
+                     "single-quoted literals", ms)
 
     return Stage("shape", True, "single SELECT", ms)
 
@@ -437,7 +531,13 @@ async def validate_cost(sql: str, max_cost: float = MAX_COST) -> tuple[Stage, fl
     try:
         async with acquire(timeout_ms=10_000) as conn:
             async with conn.cursor() as cur:
-                await cur.execute(f"EXPLAIN (FORMAT JSON) {sql}")
+                # binary=True forces the extended query protocol, where Postgres
+                # itself refuses a second command in one statement. This runs
+                # the model's SQL inside EXPLAIN before execute_guarded does, so
+                # a multi-statement payload that slipped past the text gates is
+                # stopped by the server here, not run. The gates are defence in
+                # depth; this is the boundary, alongside the read-only role.
+                await cur.execute(f"EXPLAIN (FORMAT JSON) {sql}", binary=True)
                 row = await cur.fetchone()
         plan = list(row.values())[0][0]["Plan"]
         cost = float(plan.get("Total Cost", 0.0))
@@ -458,7 +558,9 @@ async def execute_guarded(sql: str) -> tuple[Stage, list[dict], list[str]]:
     try:
         async with acquire(timeout_ms=STATEMENT_TIMEOUT_MS) as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql)
+                # binary=True: the extended protocol, so Postgres rejects a
+                # second statement rather than running it. See validate_cost.
+                await cur.execute(sql, binary=True)
                 rows = await cur.fetchmany(MAX_ROWS)
                 cols = [d.name for d in (cur.description or [])]
     except Exception as exc:
