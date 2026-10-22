@@ -187,7 +187,16 @@ def test_ask_refuses_an_unmodelled_metric(ai_client):
     assert body["routing"]["rule"] == "forecast_scope"
 
 
-def test_ask_asks_which_department_rather_than_guessing(ai_client):
+def test_ask_asks_which_department_rather_than_guessing(ai_client, monkeypatch):
+    # No department can be resolved deterministically from "revenue", so /ask
+    # consults the model. Inject a fake provider that returns NONE, so the test
+    # exercises the "no department identified" path with no API key or network:
+    # in CI there is no key, and the real provider would return AI_UNAVAILABLE
+    # (a different, key-dependent response) instead of this governance refusal.
+    from rrip.ai.provider import FakeProvider
+    from rrip.api import limits
+    monkeypatch.setattr(limits, "get_provider",
+                        lambda name=None, use_cache=True: FakeProvider(["NONE"]))
     r = ai_client.post("/api/v1/ai/ask",
                        json={"question": "Forecast next week's revenue."})
     body = r.json()
