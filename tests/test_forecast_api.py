@@ -9,6 +9,8 @@ department" by something more reliable than matching on prose.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -24,6 +26,8 @@ def client():
     try:
         FS.load_store(R.MODEL_DIR, force=True)
     except FS.ForecastUnavailable as exc:
+        if os.getenv("RRIP_REQUIRE_FORECAST_ARTIFACT"):
+            raise
         pytest.skip(f"no trained forecast artifact: {exc}")
 
     app = FastAPI()
@@ -136,6 +140,8 @@ def ai_client():
     try:
         FS.load_store(R.MODEL_DIR, force=True)
     except FS.ForecastUnavailable as exc:
+        if os.getenv("RRIP_REQUIRE_FORECAST_ARTIFACT"):
+            raise
         pytest.skip(f"no trained forecast artifact: {exc}")
 
     from rrip.api import ai_routes

@@ -10,6 +10,7 @@ same rule tests/test_readonly_role.py follows.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -265,6 +266,8 @@ def _real_or_skip():
     try:
         return FS.load_store(R.MODEL_DIR, force=True)
     except FS.ForecastUnavailable as exc:
+        if os.getenv("RRIP_REQUIRE_FORECAST_ARTIFACT"):
+            raise
         pytest.skip(f"no trained forecast artifact: {exc}")
 
 
