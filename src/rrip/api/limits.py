@@ -74,7 +74,14 @@ _UNAVAILABLE = ("AI features are temporarily unavailable. The dashboards and "
 _CAP = ("This demo's daily AI budget has been used up. The dashboards still "
         "work; AI questions resume at 00:00 UTC.")
 _RATE = "Too many AI requests from your network. Please wait and try again."
+_RATE_DAILY = ("Your network has used up today's AI question allowance. The "
+               "dashboards still work; AI questions reset at 00:00 UTC.")
 _ORIGIN = "AI requests are accepted only from this project's web app."
+
+# A UTC day, for the per-client daily allowance. The per-minute window above
+# floors to minute boundaries; this floors to the day, so the bucket resets at
+# 00:00 UTC. Both live in api_rate_limit and expire under the same cleanup.
+_DAY_SECONDS = 86_400
 
 
 def mode() -> str:
@@ -174,23 +181,26 @@ def client_ip(request: Request) -> str:
     return str(addr)
 
 
-def bucket_key(ip: str) -> str:
+def bucket_key(ip: str, prefix: str = "ip") -> str:
     # Hashed so the table holds no raw addresses. Not anonymisation -- the
     # IPv4 space is small enough to enumerate -- but rows live a day at most.
-    return "ip:" + hashlib.sha256(ip.encode()).hexdigest()[:32]
+    # `prefix` separates the per-minute bucket ("ip") from the per-day one
+    # ("ipd") for the same address, so they count independently in one table.
+    return f"{prefix}:" + hashlib.sha256(ip.encode()).hexdigest()[:32]
 
 
 async def hit_ip(ip: str, *, limit: int | None = None, window: int | None = None,
-                 at: datetime | None = None) -> int:
+                 at: datetime | None = None, prefix: str = "ip",
+                 message: str | None = None) -> int:
     """Count one request for this client; refuse past the limit."""
     limit = limit or settings.ai_rate_limit
     window = window or settings.ai_rate_window_seconds
     count, retry_after = await _one(
-        _IP_SQL, {"key": bucket_key(ip), "window": window, "at": at})
+        _IP_SQL, {"key": bucket_key(ip, prefix), "window": window, "at": at})
     if count == 1:
         await _cleanup(at)
     if count > limit:
-        raise RateLimitExceeded(_RATE, retry_after=max(int(retry_after), 1))
+        raise RateLimitExceeded(message or _RATE, retry_after=max(int(retry_after), 1))
     return count
 
 
@@ -251,12 +261,22 @@ async def protect(request: Request) -> None:
                      "DSN is set")
         raise ProtectionUnavailable(_UNAVAILABLE)
     check_origin(request)
-    await hit_ip(client_ip(request))
+    ip = client_ip(request)
+    # Per-minute burst limit, then the per-day allowance for the same address.
+    # The per-minute cap alone lets one client reach the global daily cap in
+    # about 15 minutes; this bounds how much of it any one network can take.
+    await hit_ip(ip)
+    await hit_ip(ip, limit=settings.ai_daily_per_ip, window=_DAY_SECONDS,
+                 prefix="ipd", message=_RATE_DAILY)
 
 
 def guarded_provider(name: str | None = None) -> LLMProvider:
     """The only way API code should obtain a provider: rationed by the cap."""
     p = get_provider(name, use_cache=settings.llm_cache)
+    # API traffic runs inside a 60 s serverless function. Two attempts with one
+    # short backoff fit; the default four, each able to wait on a provider, do
+    # not -- and every attempt is charged to the daily cap.
+    p.max_retries = 2
     m = mode()
     if m == ON:
         p.budget = charge_llm_call

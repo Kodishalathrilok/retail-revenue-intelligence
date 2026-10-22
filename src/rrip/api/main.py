@@ -51,6 +51,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Edge caching for the published tier. Every dashboard GET there reads
+# precomputed pub_* rows that change only on a deliberate republish, so a short
+# shared cache lets Vercel's CDN absorb repeat loads (the Overview alone makes
+# eight GETs a visit) and serve through a cold start. Only successful GETs are
+# cached, and never /health* (readiness must be live) or the AI routes (POST,
+# and /ai/status must report the live protection mode). Nothing per-visitor is
+# served here -- there are no accounts -- so a shared cache leaks nothing.
+_CACHE_CONTROL = "public, s-maxage=300, stale-while-revalidate=86400"
+_NEVER_CACHE = ("/api/v1/ai/status",)
+
+
+@app.middleware("http")
+async def cache_published_reads(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if (settings.is_published and request.method == "GET"
+            and response.status_code == 200
+            and not path.startswith("/health")
+            and path not in _NEVER_CACHE):
+        response.headers.setdefault("Cache-Control", _CACHE_CONTROL)
+    return response
+
+
 @app.exception_handler(CallRefused)
 async def refused(_request: Request, exc: CallRefused) -> JSONResponse:
     """Every abuse-protection refusal, in one machine-readable shape.

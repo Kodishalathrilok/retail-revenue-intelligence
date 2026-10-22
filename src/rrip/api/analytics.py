@@ -132,10 +132,12 @@ async def products_pareto(
     """
     try:
         cur = Cursor.decode(cursor)
-    except ValueError:
+        # A well-formed but empty or non-integer cursor (e.g. "W10=" -> []) used
+        # to raise IndexError/ValueError here and surface as a 500. A cursor the
+        # server did not issue is a bad request, not a server fault.
+        after_rank = int(cur.last_values[0]) if cur and cur.last_values else 0
+    except (ValueError, TypeError, IndexError):
         raise HTTPException(400, "malformed cursor") from None
-
-    after_rank = int(cur.last_values[0]) if cur else 0
     rows = await fetch(
         Q.pick(Q.PARETO_LOCAL, Q.PARETO_PUBLISHED),
         {"after_rank": after_rank, "limit": limit + 1},

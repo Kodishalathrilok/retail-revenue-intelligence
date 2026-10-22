@@ -96,6 +96,14 @@ class NLQueryRequest(BaseModel):
     max_attempts: int = Field(default=2, ge=1, le=3)
 
 
+class AskRequest(BaseModel):
+    """Body for POST /ai/ask. Previously a bare dict, so a question of any size
+    went to the router (hundreds of phrase scans) and into a model prompt. The
+    same 3..500 bound as NLQueryRequest."""
+
+    question: str = Field(min_length=3, max_length=500)
+
+
 # The serialised payload becomes the prompt, and prompt size is cost. 20k
 # characters is several hundred result rows -- more than a narration can use.
 NARRATE_MAX_CHARS = 20_000

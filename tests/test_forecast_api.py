@@ -201,7 +201,10 @@ def test_ask_surfaces_a_governance_refusal_intact(ai_client):
 
 
 def test_ask_requires_a_question(ai_client):
-    assert ai_client.post("/api/v1/ai/ask", json={}).status_code == 400
+    # A missing/blank question is now a request-validation error (the body is a
+    # bounded model, 3..500 chars) rather than a hand-rolled 400.
+    assert ai_client.post("/api/v1/ai/ask", json={}).status_code == 422
+    assert ai_client.post("/api/v1/ai/ask", json={"question": ""}).status_code == 422
 
 
 # --- the serverless constraint ----------------------------------------------
