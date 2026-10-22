@@ -11,6 +11,12 @@ data/
 *.csv
 *.zip
 !tests/fixtures/**/*.csv
+# The forecast serving table is a build artifact, but a small one (~1 MB) and
+# the companion of models/forecast/metadata.json and model.pkl, which are
+# tracked. Tracking it lets the forecast serving tests run in CI instead of
+# skipping (they need load_store() to find it); RRIP_REQUIRE_FORECAST_ARTIFACT
+# in CI turns a future deletion into a failure rather than a silent skip.
+!models/forecast/serving.csv
 
 # --- Python ---
 __pycache__/
@@ -59,11 +65,11 @@ frontend/next-env.d.ts
 
 # Adjudication artefacts. The *.csv rule above exists for the raw dunnhumby
 # data; these are evidence and are tracked deliberately.
-!evals/narration/adjudication_worksheet.csv
-!evals/narration/adjudication_worksheet_human.csv
-!evals/narration/adjudication_judge.csv
+!eval/narration/adjudication_worksheet.csv
+!eval/narration/adjudication_worksheet_human.csv
+!eval/narration/adjudication_judge.csv
 
 # The KEY is NOT tracked. It maps opaque row ids back to arm and case, which is
 # the whole thing the worksheet is blinded against -- committing it alongside
 # the worksheet would undo the blinding for anyone re-running the audit.
-evals/narration/adjudication_key.csv
+eval/narration/adjudication_key.csv

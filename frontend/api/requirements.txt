@@ -1,13 +1,33 @@
 # Installed by Vercel for the Python function.
 #
-# Pulls the rrip package from the public repo AT AN EXACT COMMIT. It used to
-# track @main, so the deployed API was whatever main happened to be at build
-# time -- including, when this was found, code without the AI endpoint
-# protection the docs described. Pinning makes each deploy reproducible and
-# reviewable: bump the SHA deliberately, to a commit that passed CI.
+# Two things are pinned here, for two different reasons:
 #
-# Only the CORE
-# dependencies come with it -- the `pipeline` extra (pandas, statsmodels,
-# scipy, dowhy) is deliberately not requested, because the published tier
-# never executes that code.
+# 1. The rrip package itself, pulled from the public repo AT AN EXACT COMMIT.
+#    It used to track @main, so the deployed API was whatever main happened to
+#    be at build time -- including, when this was found, code without the AI
+#    endpoint protection the docs described. A SHA makes each deploy
+#    reproducible and reviewable: bump it deliberately, to a commit that passed
+#    CI.
+#
+# 2. The core runtime dependencies, at the exact versions the test suite runs
+#    against. rrip's own metadata declares these with >= floors (pyproject.toml,
+#    [project].dependencies); left to float, a Vercel build could resolve a
+#    newer release than CI ever tested -- which has already bitten once, when a
+#    FastAPI minor changed how routers nest and silently voided a protection
+#    test. Pinning makes the deployed versions the tested versions.
+#    tests/test_function_requirements.py keeps this list in step with the floors.
+#
+# Only the CORE set is installed -- the `pipeline` extra (pandas, statsmodels,
+# scipy, scikit-learn) is deliberately not requested, because the published
+# tier never executes that code and it is 332.9 MB against Vercel's 250 MB limit.
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+psycopg[binary]==3.3.4
+psycopg_pool==3.3.1
+pydantic==2.13.4
+pydantic-settings==2.15.0
+httpx==0.28.1
+typer==0.27.1
+rich==15.0.0
+
 rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@23c6f6b784c950bf5b0da6339aef603eed4c1a71

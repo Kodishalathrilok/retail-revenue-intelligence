@@ -30,7 +30,22 @@ jobs:
       - name: Unit tests
         # Integration tests requiring a loaded database are excluded here and
         # run in the job below, which builds one.
+        #
+        # RRIP_REQUIRE_FORECAST_ARTIFACT makes the forecast serving tests FAIL
+        # rather than skip if models/forecast/serving.csv is ever missing -- it
+        # is tracked, so a deletion that would quietly stop exercising the
+        # forecast surface is caught here instead of passing green.
+        env:
+          RRIP_REQUIRE_FORECAST_ARTIFACT: "1"
         run: pytest -q --ignore=tests/test_load_integrity.py
+      - name: Dependency audit (report-only)
+        # Surfaces known advisories in the installed packages without wedging
+        # the pipeline on an unrelated transitive CVE. The local rrip package is
+        # not on PyPI, so it is skipped rather than failing the audit.
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable || true
 
   data-quality:
     runs-on: ubuntu-latest
@@ -158,6 +173,10 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # Production dependencies only: the deployed bundle ships none of the dev
+      # tree, so a dev-only advisory must not block a deploy. High/critical in a
+      # shipped package does block -- it is clean today.
+      - run: npm audit --omit=dev --audit-level=high
       # Type errors and unresolved imports fail the build, so this is the
       # frontend's type check as well as its build.
       - run: npx next build

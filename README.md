@@ -239,6 +239,9 @@ check and the production smoke test are in
   pre-trend test has low power, so not rejecting is weak evidence. On the
   hosted demo the results are stored, not re-estimated, and the estimator
   validation endpoint is local-only: it answers `503 LOCAL_ONLY` in production.
+  The panel counts only the weeks in which a household actually shopped, so the
+  effect is measured on spend per shopping week, not on spend averaged over all
+  eligible households including the weeks they bought nothing.
 - **Explain panels and verdicts are static text.** They are written once and
   checked against the code by tests. No model generates them.
 - **Dates are a convention.** The source has day numbers and no calendar

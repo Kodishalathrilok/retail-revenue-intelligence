@@ -369,6 +369,33 @@ the violation. An estimator that passed every scenario would not be under test.
 
 ---
 
+## 9. The DiD panel measures spend conditional on shopping, by choice
+
+This one is not a corrected error but a standing modelling decision, recorded
+here because it changes what the headline number *means* and is easy to read
+past.
+
+`build_panel` in `src/rrip/ai/causal.py` inner-joins households to
+`fact_transactions`, so the panel has one row per household-week in which the
+household actually shopped. A week with no purchase is **absent, not a
+zero-spend row**, and a household that shopped in neither period contributes no
+rows at all — which is why campaign 26's analysed control group is 2,140
+households, below the 2,165 that were eligible.
+
+The consequence: the difference-in-differences coefficient is the effect on
+spend **per shopping week** — the intensive margin — not the effect on spend
+averaged over every eligible household including the weeks they bought nothing.
+Those are different estimands. A campaign that made the same shoppers spend more
+per trip and one that brought lapsed households back would show up differently
+under each, and this panel sees the first more cleanly than the second.
+
+Filling the absent household-weeks with explicit zeros would switch to the
+unconditional estimand and could move the estimate. That is a deliberate future
+option, not a bug; the choice is stated so the number is read on its real basis,
+the same way the panel-versus-retailer and targeted-not-randomised caveats are.
+
+---
+
 ## What generalises
 
 All eight errors share a shape: each produced output that looked correct.

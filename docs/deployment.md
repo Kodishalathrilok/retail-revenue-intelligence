@@ -109,18 +109,26 @@ evaluation report stop agreeing on it.
 
 ## Publishing
 
-`rrip publish` (to be built) would:
+`rrip publish` (see [`src/rrip/publish/publisher.py`](../src/rrip/publish/publisher.py)):
 
-1. Connect to local and to `RRIP_PUBLISH_DSN`.
-2. Create the `pub_*` tables if absent.
-3. Recompute each aggregate from the local star schema.
-4. `COPY` results out and into the target inside one transaction per table.
-5. Run the quality suite against the published tier — the same assertions where
-   they apply — and exit non-zero on failure.
-6. Record a `pub_manifest` row with source row counts, published row counts and
-   a timestamp, so a stale deployment is detectable rather than assumed fresh.
+1. Connects to local and to `RRIP_PUBLISH_DSN`.
+2. Drops and recreates each `pub_*` table inside its own transaction, so a
+   failure cannot leave a half-written table visible to readers.
+3. Recomputes each aggregate from the local star schema (and the causal results
+   from statsmodels, and the stored forecasts).
+4. `COPY`s each table out of local and into the target in binary format.
+5. Records a `pub_manifest` row per table with row counts and a timestamp, so a
+   stale deployment is detectable rather than assumed fresh.
 
-Refresh is manual. The panel ended at day 711; the data does not change.
+Publishing is idempotent and refresh is manual: the panel ended at day 711, so
+the data does not change.
+
+**One limitation to know.** `push()` rebuilds each hosted table's DDL from the
+local `information_schema` column types, which carries the columns but **not the
+primary keys or indexes**. At 13.3 MB and 120,800 rows that costs nothing in
+practice, and every hosted query is a small scan, but uniqueness is not enforced
+on the hosted copy — it is trusted to match what local built. Re-deriving the
+keys on the target is a worthwhile follow-up, not a correctness bug today.
 
 ## What I need from you
 
@@ -128,9 +136,9 @@ Refresh is manual. The panel ended at day 711; the data does not change.
 |---|---|---|---|---|
 | 1 | **Neon account + connection string** | [neon.tech](https://neon.tech) | Hosted Postgres for the `pub_*` tables | Free tier. Create the project with **C collation** if the option is offered, so ordering matches local. Put the DSN in `.env` as `RRIP_PUBLISH_DSN`. |
 | 2 | **Vercel account** | [vercel.com](https://vercel.com) | Next.js frontend hosting | Free Hobby tier. Connect it to the GitHub repo; set root directory to `frontend/`. |
-| 3 | ~~A host for the FastAPI service~~ | -- | **Superseded:** the API runs as a Vercel Python function (`frontend/api/index.py`) on the same origin as the frontend. The host comparison below is kept for the record. | The function installs `rrip` at an **exact commit** (`frontend/api/requirements.txt`), never `@main`. |
+| 3 | ~~A host for the FastAPI service~~ | -- | **Superseded:** the API runs as a Vercel Python function (`frontend/api/index.py`) on the same origin as the frontend. | The function installs `rrip` at an **exact commit** with pinned runtime dependencies (`frontend/api/requirements.txt`), never `@main`. |
 | 4 | **Gemini API key for the hosted env** | already have | NL→SQL and narration | Set as an environment variable on the API host — **not** committed. The rotated key is fine. |
-| 5 | **GitHub repository** | — | CI already exists and needs somewhere to run | Currently local-only, no remote. |
+| 5 | **GitHub repository** | [github.com](https://github.com) | CI runs on every pull request; Vercel deploys from `main` | Public repo, so the production check reads CI and `/health` unauthenticated. |
 | 6 | **Read-only role on the published database** | Neon SQL editor or `psql` | The NL→SQL endpoint is public; the validator is defence in depth, the role is the boundary | Run [`sql/ddl/60_readonly_role.sql`](../sql/ddl/60_readonly_role.sql) **after** `rrip publish` creates the tables, then set `RRIP_PG_READONLY_DSN` to a DSN for `rrip_ro`, and do **not** give the API `RRIP_PG_DSN` at all. See below. |
 | 7 | **Limiter role on the published database** | Neon SQL editor or `psql` | The AI endpoints spend Gemini calls; without the counters they refuse on the published tier | Run [`sql/ddl/70_api_limits.sql`](../sql/ddl/70_api_limits.sql) **after** step 6, then set `RRIP_LIMITER_DSN` and `RRIP_TRUSTED_IP_HEADER=x-vercel-forwarded-for` in the Vercel environment. See below. |
 
@@ -296,24 +304,18 @@ artifact, which the function does not have, so every forecast question returned
 
 After testing, the day's counter was reset and the cap raised to 300.
 
-### Choosing an API host
+### Why no separate API host
 
-Verified August 2026. **Fly.io no longer has a free tier** -- it ended in 2024,
-and the earlier version of this document was wrong to call it free.
+The API runs as a Vercel Python function (`frontend/api/index.py`) on the same
+origin as the frontend, so there is no second service to host, no CORS hop
+between them, and one deploy ships both. That is only possible because the
+published tier does not import the scientific stack: the core dependencies are
+~30 MB against Vercel's 250 MB function limit, while the `pipeline` extra
+(pandas, statsmodels, scipy) is 332.9 MB and stays local (see `pyproject.toml`).
 
-| Host | Free? | Cold start | Notes |
-|---|---|---|---|
-| **Google Cloud Run** | Yes -- 2M requests/month, scales to zero | ~5-10s for a Python image | Best free option. Docker-native, so the existing Dockerfile works. Needs a card on file for the account, but the free allowance is real. |
-| **Render** | Yes | **~30s** after 15 min idle | Simplest to set up. The cold start is the problem: the causal endpoint already takes ~12s warm, so a first request after idle looks broken. |
-| **Fly.io** | **No** | ~2s, stays warm | ~$2-5/month for one always-on 512MB machine. Best experience, not free. |
-
-**Recommendation depends on what you are optimising:**
-
-- **Free and acceptable** -- Cloud Run. Scales to zero, so an idle demo costs
-  nothing, and a 5-10s cold start is tolerable for a portfolio piece.
-- **Free and simplest** -- Render, if you can live with a 30s first load.
-- **Best demo experience** -- Fly.io at ~$2-5/month. Worth it if you are sending
-  the link to an interviewer and want it instant.
-
-`fly.toml` and the `Dockerfile` are already written; the Dockerfile works
-unchanged on Cloud Run and Render, both of which build from it.
+An earlier revision shipped a `Dockerfile` and a `fly.toml` for running the API
+as a standalone container on Fly.io or Cloud Run. They were removed once the
+Vercel-function deployment was verified: keeping deployment manifests for a path
+the project does not use is a maintenance liability and a source of drift. If a
+container host is ever needed again, the API is a plain ASGI app
+(`uvicorn rrip.api.main:app`) and a Dockerfile is a few lines.
