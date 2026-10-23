@@ -80,6 +80,54 @@ def test_blocks_recursive_cte() -> None:
     assert rejecting_gate(sql) == "shape"
 
 
+# --- lexer-desync bypasses --------------------------------------------------
+#
+# Each hides a second statement inside a literal form the old scanner mis-ended,
+# so strip_sql_noise returned it as a single SELECT and every text gate passed.
+# Postgres ends the literal earlier and sees two commands. These pin that the
+# scanner now agrees with Postgres about where the literal closes.
+
+LEXER_DESYNC = [
+    "SELECT $$'$$; DROP TABLE pub_headline; SELECT '$$'",
+    'SELECT 1 AS "\'"; DROP TABLE pub_headline; SELECT 1 AS "\'"',
+    "SELECT E'\\''; DROP TABLE pub_headline; --'",
+    "SELECT $$'$$; SET statement_timeout = 0; SELECT '$$'",
+]
+
+
+@pytest.mark.parametrize("sql", LEXER_DESYNC)
+def test_blocks_statements_hidden_by_lexer_desync(sql: str) -> None:
+    assert blocked(sql), f"desync bypass not blocked: {sql}"
+
+
+def test_select_into_temp_is_blocked() -> None:
+    """A temp table named like a published one shadows it on a pooled connection.
+
+    Blocked at the keyword gate by `into`; the role also revokes TEMPORARY.
+    """
+    sql = ("SELECT week_no, 999999.0 AS revenue INTO TEMP pub_weekly_revenue "
+           "FROM pub_weekly_revenue")
+    assert rejecting_gate(sql) == "keywords"
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT \"query_to_xml\"('SELECT 1', true, true, '')",
+    'SELECT count(*) FROM "generate_series"(1, 100000000000)',
+    'SELECT "table_to_xml"(\'pub_headline\', true, true, \'\')',
+])
+def test_quoted_function_names_do_not_escape_the_allowlist(sql: str) -> None:
+    """A call written "query_to_xml"(...) must still be seen as a call."""
+    assert rejecting_gate(sql) == "functions"
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT $$ anything $$ FROM pub_weekly_revenue",
+    "SELECT 'a' || E'\\n' FROM pub_weekly_revenue",
+])
+def test_dollar_quotes_and_backslashes_are_rejected_at_shape(sql: str) -> None:
+    assert rejecting_gate(sql) == "shape"
+
+
 @pytest.mark.parametrize("sql", [
     "SELECT * FROM pg_shadow",
     "SELECT * FROM pg_stat_activity",
@@ -132,6 +180,9 @@ LEGITIMATE = [
     "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY revenue) FROM pub_weekly_revenue",
     # A forbidden word inside a string literal is data, not a keyword.
     "SELECT department FROM pub_weekly_revenue_by_dept WHERE department = 'drop table'",
+    # A quoted identifier alias is kept (sanitised) and is not read as a call.
+    'SELECT round(avg(revenue), 2) AS "Total Revenue" FROM pub_weekly_revenue',
+    'SELECT week_no AS "Week No" FROM pub_weekly_revenue LIMIT 5',
 ]
 
 

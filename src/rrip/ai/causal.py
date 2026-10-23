@@ -160,6 +160,20 @@ def build_panel(conn, campaign_id: int, pre_window: int = 180,
     The treated group excludes households enrolled in any campaign overlapping
     this one's analysis window -- the same definition Phase 0 used to screen
     campaigns. Control excludes them too.
+
+    WHAT A ROW IS, AND WHAT IS ABSENT. The panel is an INNER join to
+    fact_transactions, so there is one row per household-week in which that
+    household actually shopped. A week with no purchase is absent, not a
+    zero-spend row, and a household that shopped in neither period contributes
+    no rows and silently drops out -- which is why the analysed control count is
+    below the eligible count (campaign 26: 2,140 analysed of 2,165 eligible).
+
+    So `spend` here is spend CONDITIONAL on shopping that week (the intensive
+    margin), not spend-or-zero across all eligible households (the unconditional
+    mean). The estimate is interpreted on that basis. Filling the absent
+    household-weeks with explicit zeros would measure the unconditional effect
+    instead and could move the estimate; it is a deliberate modelling choice,
+    recorded in docs/methodology-notes.md, not an oversight.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT start_day, end_day FROM dim_campaign WHERE campaign_id = %s",
@@ -261,7 +275,17 @@ def check_parallel_trends(df: pd.DataFrame, alpha: float = 0.05) -> ParallelTren
 
 def estimate_did(df: pd.DataFrame, confounders: list[str] | None = None,
                  household_attrs: pd.DataFrame | None = None) -> dict:
-    """Two-way fixed effects DiD. Returns the estimate, never a verdict."""
+    """The 2x2 difference-in-differences regression. Returns the estimate, never
+    a verdict.
+
+    This is pooled OLS of spend on `treated * post`, where the coefficient on
+    the interaction is the DiD estimate, with standard errors clustered by
+    household. It is NOT a two-way (unit-and-time) fixed-effects model -- there
+    are no household or week dummies -- so the two group means and the two
+    period means carry the identification, and clustering is what accounts for
+    repeated weekly observations of the same household. The optional covariate
+    terms adjust that regression; they do not turn it into a fixed-effects one.
+    """
     assert_model_dtypes(df, ["spend", "treated", "post"])
     base = smf.ols("spend ~ treated * post", data=df).fit(
         cov_type="cluster", cov_kwds={"groups": df["household_key"]})
