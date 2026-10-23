@@ -90,6 +90,15 @@ export const METRICS = {
     calculation: 'Each household is scored 1–5 on recency, number of baskets and total spend, then placed in a segment by fixed rules. Share of revenue is the segment’s spend divided by all spend.',
     limitation: 'Recency is measured against the last day of the panel, not today. Segments describe past behaviour; they do not predict it.',
   },
+  retention: {
+    label: 'Retention by tenure',
+    definition: 'The share of each onboarding group still buying, by how long the household has been in the panel.',
+    source: 'Households split into three groups by the size of their first basket, then tracked over relative tenure.',
+    endpoint: '/api/v1/retention/tenure',
+    tables: ['pub_retention_tenure', 'fact_transactions'],
+    calculation: 'Each household is timed from its own first purchase (relative tenure, in 30-day months). Retention in a tenure month is the share of a group that bought in that month. Groups are terciles of first-basket spend.',
+    limitation: 'Relative tenure, not calendar cohorts. The 711-day window means later tenure months cover fewer households, so the fall past about month 12 is incomplete follow-up rather than churn.',
+  },
   forecast: {
     label: 'Next-week forecast',
     definition: 'Expected revenue for one department in the next panel week, with the range the actual figure is likely to fall in.',
