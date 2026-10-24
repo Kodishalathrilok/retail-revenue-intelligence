@@ -187,6 +187,7 @@ def test_init_sentry_passes_privacy_options_when_a_dsn_is_set(monkeypatch) -> No
     assert captured["include_local_variables"] is False
     assert captured["trace_propagation_targets"] == []
     assert captured["auto_session_tracking"] is False
+    assert [i.identifier for i in captured["disabled_integrations"]] == ["argv"]
     assert captured["before_send"] is obs.before_send
     assert captured["before_send_transaction"] is obs.before_send_transaction
     assert captured["before_breadcrumb"] is obs.before_breadcrumb
@@ -224,8 +225,34 @@ def _gemini_error(status: int, code: str = "INVALID_ARGUMENT") -> httpx.Response
                                                   "message": _ECHO}})
 
 
+def _err(http_status: int, **error) -> httpx.Response:
+    return httpx.Response(http_status, json={"error": error})
+
+
+@pytest.mark.parametrize("response, expected", [
+    # Recognised codes are kept: they are the diagnosis.
+    (_err(429, status="RESOURCE_EXHAUSTED"), "429 RESOURCE_EXHAUSTED"),
+    (_err(404, code="model_not_found", type="invalid_request_error"), "404 model_not_found"),
+    # Well-formed but not on the allowlist: dropped, not trusted.
+    (_err(400, status="QUOTA_PROJECT_SUSPENDED_V2"), "400"),
+    # Credential-shaped "codes" -- one token each, so a syntax check would pass them.
+    (_err(401, status=KEY_S), "401"),
+    (_err(401, code="sk-SENTINELsecretkeyxxxxxxxxxxxxxxxx"), "401"),
+    (_err(400, status=PROMPT_S), "400"),
+    # Prompt and SQL in the message, beside a valid code: the code alone survives.
+    (_err(400, status="INVALID_ARGUMENT", message=_ECHO), "400 INVALID_ARGUMENT"),
+    # Not a string at all.
+    (_err(400, status=400), "400"),
+])
+def test_upstream_error_keeps_only_recognised_codes(response, expected) -> None:
+    out = P._upstream_error(response)
+    assert out == expected
+    assert not _leaks(out) and "sk-SENTINEL" not in out
+
+
 @pytest.mark.parametrize("provider_cls, response, expected", [
     (P.GeminiProvider, _gemini_error(400), "400 INVALID_ARGUMENT"),
+    (P.GeminiProvider, _gemini_error(401, KEY_S), "returned 401"),           # key as the code
     (P.GeminiProvider, _gemini_error(403, "PERMISSION_DENIED"), "403 PERMISSION_DENIED"),
     (P.GeminiProvider, _gemini_error(503, "UNAVAILABLE"), "503 UNAVAILABLE"),   # whole chain
     (P.GeminiProvider, httpx.Response(500, text=_ECHO), "returned 500"),        # non-JSON body
@@ -249,18 +276,24 @@ def test_provider_error_message_carries_status_and_code_not_the_body(
     assert expected in msg, msg            # still diagnosable
 
 
-def _failing_gemini(monkeypatch) -> P.GeminiProvider:
-    _mock_http(monkeypatch, lambda req: _gemini_error(400))
+def _failing_gemini(monkeypatch, code: str) -> P.GeminiProvider:
+    _mock_http(monkeypatch, lambda req: _gemini_error(400, code))
     p = P.GeminiProvider(api_key="test-key", use_cache=False)
     monkeypatch.setattr(limits, "get_provider", lambda name=None, use_cache=True: p)
     return p
 
 
+# (error.status the provider sends, what the diagnostics should say)
+_CODE_CASES = [("INVALID_ARGUMENT", "400 INVALID_ARGUMENT"),
+               (KEY_S, "returned 400")]                 # a key posing as a code
+
+
+@pytest.mark.parametrize("code, expected", _CODE_CASES)
 def test_a_provider_failure_logs_a_summary_and_the_response_is_unchanged(
-        monkeypatch, caplog) -> None:
+        monkeypatch, caplog, code, expected) -> None:
     from rrip.api.main import app
 
-    _failing_gemini(monkeypatch)
+    _failing_gemini(monkeypatch, code)
     caplog.set_level(logging.WARNING)
     r = TestClient(app).post("/api/v1/ai/narrate",
                              json={"data": {"revenue": 1}, "question": f"Explain {PROMPT_S}"})
@@ -274,20 +307,19 @@ def test_a_provider_failure_logs_a_summary_and_the_response_is_unchanged(
 
     # The log line: provider, model, status and code -- and nothing planted.
     logged = "\n".join(rec.getMessage() for rec in caplog.records)
-    assert "gemini" in logged and "400 INVALID_ARGUMENT" in logged, logged
+    assert "gemini" in logged and expected in logged, logged
     assert not _leaks(logged), f"provider body leaked into a log record: {logged}"
 
 
 # Run in a subprocess: sentry_sdk.init() patches logging and httpx process-wide,
 # which must not bleed into the rest of the suite. A capturing transport stands
-# in for the network; the DSN is syntactically valid and never contacted.
-_SENTRY_PROBE = r'''
+# in for the network; the DSN is syntactically valid and never contacted. The
+# preamble is the real init_sentry() config; each probe body appends to it.
+_PROBE_PREAMBLE = r'''
 import asyncio, json, sys
-import httpx, sentry_sdk
+import sentry_sdk
 from sentry_sdk.transport import Transport
-from rrip.ai import provider as P
-from rrip.api import ai_routes, limits, observability as obs
-from rrip.api.models import NarrateRequest
+from rrip.api import observability as obs
 from rrip.config import settings
 
 S = json.loads(sys.argv[1])
@@ -304,9 +336,26 @@ _init = sentry_sdk.init
 sentry_sdk.init = lambda **kw: _init(**kw, transport=cap)
 settings.sentry_dsn = "https://publickey@o0.ingest.sentry.io/0"
 assert obs.init_sentry()
+'''
+
+
+def _run_probe(body: str, payload: dict) -> dict:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SENTRY_")}
+    r = subprocess.run([sys.executable, "-c", _PROBE_PREAMBLE + body, json.dumps(payload)],
+                       capture_output=True, text=True, timeout=120, env=env,
+                       cwd=PROJECT_ROOT)
+    assert r.returncode == 0, r.stderr[-3000:]
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+_PROVIDER_PROBE = r'''
+import httpx
+from rrip.ai import provider as P
+from rrip.api import ai_routes, limits
+from rrip.api.models import NarrateRequest
 
 def upstream(req):
-    return httpx.Response(400, json={"error": {"code": 400, "status": "INVALID_ARGUMENT",
+    return httpx.Response(400, json={"error": {"code": 400, "status": S["status"],
                                                "message": S["echo"]}})
 _real = httpx.AsyncClient
 P.httpx.AsyncClient = lambda *a, **kw: _real(*a, transport=httpx.MockTransport(upstream), **kw)
@@ -331,14 +380,11 @@ print(json.dumps({"response": out, "items": cap.items}, default=str))
 '''
 
 
-def test_sentry_event_and_breadcrumbs_from_a_provider_failure_carry_no_prompt_sql_or_key():
-    probe = {"question": f"Explain {PROMPT_S}", "key": KEY_S, "echo": _ECHO}
-    env = {k: v for k, v in os.environ.items() if not k.startswith("SENTRY_")}
-    r = subprocess.run([sys.executable, "-c", _SENTRY_PROBE, json.dumps(probe)],
-                       capture_output=True, text=True, timeout=120, env=env,
-                       cwd=PROJECT_ROOT)
-    assert r.returncode == 0, r.stderr[-3000:]
-    out = json.loads(r.stdout.strip().splitlines()[-1])
+@pytest.mark.parametrize("code, expected", _CODE_CASES)
+def test_sentry_event_and_breadcrumbs_from_a_provider_failure_carry_no_prompt_sql_or_key(
+        code, expected) -> None:
+    out = _run_probe(_PROVIDER_PROBE, {"question": f"Explain {PROMPT_S}", "key": KEY_S,
+                                       "echo": _ECHO, "status": code})
 
     events = [payload for kind, payload in out["items"] if kind == "event"]
     assert len(events) == 1, out["items"]
@@ -348,8 +394,94 @@ def test_sentry_event_and_breadcrumbs_from_a_provider_failure_carry_no_prompt_sq
     ev = events[0]
     reported = ev["exception"]["values"][-1]
     assert reported["type"] == "NonRetryable"                 # safe diagnostics kept
-    assert "400 INVALID_ARGUMENT" in reported["value"]
+    assert expected in reported["value"]
     crumbs = ev["breadcrumbs"]["values"]
-    assert any("400 INVALID_ARGUMENT" in (c.get("message") or "") for c in crumbs), crumbs
+    assert any(expected in (c.get("message") or "") for c in crumbs), crumbs
     assert any(c.get("category") == "httplib" for c in crumbs), crumbs
     assert out["response"]["rejected_reason"] == ai_routes._PROVIDER_DOWN
+
+
+# --- limiter store failures: class and SQLSTATE, never the libpq text ---------
+#
+# The planted credential is in key=value conninfo form on purpose: the scrubber's
+# value patterns catch `user:pass@host` URLs, not `password=...`, so only the
+# source-level fix keeps it out.
+
+PW_S = "LIMITER-PW-SENTINEL-d01"
+HOST_S = "ep-limiter-sentinel-d02.neon.tech"
+_DB_LEAKS = (PW_S, HOST_S, "rrip_limiter")
+
+
+def _db_errors():
+    import psycopg
+
+    return [
+        (psycopg.OperationalError(
+            f'connection to server at "{HOST_S}" (10.0.0.9), port 5432 failed: FATAL: '
+            f'password authentication failed for user "rrip_limiter"\n'
+            f"conninfo: host={HOST_S} user=rrip_limiter password={PW_S}"),
+         "OperationalError (sqlstate=none)"),
+        (psycopg.errors.InvalidPassword(
+            f'password authentication failed for user "rrip_limiter" password={PW_S}'),
+         "InvalidPassword (sqlstate=28P01)"),
+        (psycopg.ProgrammingError(
+            f'missing "=" after "host={HOST_S} user=rrip_limiter password={PW_S}" '
+            "in connection info string"),
+         "ProgrammingError (sqlstate=none)"),
+    ]
+
+
+@pytest.mark.parametrize("error, expected", _db_errors(),
+                         ids=["refused", "bad-password", "malformed-dsn"])
+def test_limiter_db_failure_logs_class_and_sqlstate_not_the_connection_text(
+        monkeypatch, caplog, error, expected) -> None:
+    async def down():
+        raise error
+
+    monkeypatch.setattr(limits, "_connect", down)
+    caplog.set_level(logging.ERROR, logger="rrip.api.limits")
+
+    # Behaviour unchanged: a store failure is still a refusal, with the same
+    # public message and no chained detail.
+    with pytest.raises(limits.ProtectionUnavailable) as exc:
+        asyncio.run(limits._one("SELECT 1", {}))
+    assert exc.value.public_message == limits._UNAVAILABLE
+    assert exc.value.__cause__ is None and exc.value.__suppress_context__
+
+    logged = "\n".join(rec.getMessage() for rec in caplog.records)
+    assert f"limiter store unavailable: {expected}" in logged, logged
+    assert not [s for s in _DB_LEAKS if s in logged], logged
+
+
+_LIMITER_PROBE = r'''
+import psycopg
+from rrip.api import limits
+
+async def down():
+    raise psycopg.errors.InvalidPassword(S["message"])
+limits._connect = down
+
+async def main():
+    try:
+        await limits._one("SELECT 1", {})
+    except limits.ProtectionUnavailable as exc:
+        return exc.public_message
+
+out = asyncio.run(main())
+sentry_sdk.flush()
+print(json.dumps({"response": out, "items": cap.items}, default=str))
+'''
+
+
+def test_sentry_event_from_a_limiter_db_failure_carries_no_connection_details() -> None:
+    out = _run_probe(_LIMITER_PROBE, {"message": (
+        f'connection to server at "{HOST_S}" failed: password authentication failed '
+        f"for user \"rrip_limiter\"; conninfo host={HOST_S} user=rrip_limiter "
+        f"password={PW_S}")})
+
+    assert out["response"] == limits._UNAVAILABLE
+    events = [payload for kind, payload in out["items"] if kind == "event"]
+    assert len(events) == 1, out["items"]          # the ERROR log line became an event
+    blob = json.dumps(events)
+    assert not [s for s in _DB_LEAKS if s in blob], blob
+    assert "InvalidPassword" in blob and "28P01" in blob   # still diagnosable

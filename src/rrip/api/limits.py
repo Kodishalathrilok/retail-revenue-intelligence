@@ -118,8 +118,13 @@ async def _one(sql: str, params: dict) -> tuple:
     try:
         return await _run(sql, params)
     except Exception as exc:
-        # The detail goes to the server log only; it can name hosts and roles.
-        logger.error("limiter store unavailable: %s: %s", type(exc).__name__, exc)
+        # Class and SQLSTATE only, never str(exc). libpq's connection errors
+        # name the host, port and role, can echo conninfo (password included)
+        # for a malformed DSN, and this ERROR line becomes a Sentry event.
+        # SQLSTATE says which failure it was (28P01 auth, 42501 grant, none for
+        # a refused connection); the class says which layer raised it.
+        logger.error("limiter store unavailable: %s (sqlstate=%s)",
+                     type(exc).__name__, getattr(exc, "sqlstate", None) or "none")
         raise ProtectionUnavailable(_UNAVAILABLE) from None
 
 

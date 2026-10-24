@@ -16,7 +16,6 @@ import asyncio
 import hashlib
 import json
 import random
-import re
 import tempfile
 import time
 from abc import ABC, abstractmethod
@@ -400,18 +399,33 @@ def _retry_after(r: httpx.Response) -> float | None:
         return None
 
 
-# A provider's error code, e.g. Gemini's "RESOURCE_EXHAUSTED" or Groq's
-# "invalid_request_error": a bare token, never prose.
-_ERROR_CODE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
+# Error codes repeated into messages, BY ALLOWLIST. A syntactic check ("one
+# word-like token") is not enough: an API key or a hyphenated prompt fragment
+# is also one token, and the field is whatever the provider sent. Anything not
+# listed collapses to the bare HTTP status; the message already names the
+# provider and model.
+_KNOWN_ERROR_CODES = frozenset({
+    # Gemini: error.status is always a google.rpc.Code name.
+    "CANCELLED", "UNKNOWN", "INVALID_ARGUMENT", "DEADLINE_EXCEEDED", "NOT_FOUND",
+    "ALREADY_EXISTS", "PERMISSION_DENIED", "UNAUTHENTICATED", "RESOURCE_EXHAUSTED",
+    "FAILED_PRECONDITION", "ABORTED", "OUT_OF_RANGE", "UNIMPLEMENTED", "INTERNAL",
+    "UNAVAILABLE", "DATA_LOSS",
+    # Groq (OpenAI-compatible): error.type, and the common error.code values.
+    "invalid_request_error", "authentication_error", "permission_error",
+    "not_found_error", "rate_limit_error", "api_error", "internal_server_error",
+    "invalid_api_key", "model_not_found", "model_decommissioned",
+    "rate_limit_exceeded", "context_length_exceeded", "json_validate_failed",
+})
 
 
 def _upstream_error(r: httpx.Response) -> str:
-    """'400 INVALID_ARGUMENT' -- the status and the provider's error code only.
+    """'400 INVALID_ARGUMENT' -- the status and a RECOGNISED error code only.
 
     Never the response body. These messages become log lines, Sentry
     breadcrumbs and chained exceptions, and an error body is provider-controlled
     text that can echo the request -- the prompt, the schema, generated SQL.
-    Status plus code is enough to tell a bad key from a quota from an outage.
+    Status plus a known code tells a bad key from a quota from an outage; an
+    unknown code is dropped rather than trusted.
     """
     try:
         err = r.json().get("error")
@@ -420,7 +434,7 @@ def _upstream_error(r: httpx.Response) -> str:
     if isinstance(err, dict):
         for key in ("status", "code", "type"):
             v = err.get(key)
-            if isinstance(v, str) and _ERROR_CODE_RE.fullmatch(v):
+            if isinstance(v, str) and v in _KNOWN_ERROR_CODES:
                 return f"{r.status_code} {v}"
     return str(r.status_code)
 

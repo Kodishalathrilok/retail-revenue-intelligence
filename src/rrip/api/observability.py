@@ -190,6 +190,7 @@ def init_sentry() -> bool:
         return False
 
     import sentry_sdk
+    from sentry_sdk.integrations.argv import ArgvIntegration
 
     sentry_sdk.init(
         dsn=dsn,
@@ -210,6 +211,11 @@ def init_sentry() -> bool:
         # default. Nothing here uses them, and a serverless function's "session"
         # is one request anyway. Off until there is a release dashboard to feed.
         auto_session_tracking=False,
+        # The default argv integration copies the process command line into
+        # every event's extra. That is arbitrary text -- a CLI run or a
+        # `python -c` check can carry a DSN or key -- so the source is off
+        # rather than scrubbed.
+        disabled_integrations=[ArgvIntegration()],
         # The boundary: nothing leaves without passing the scrubbers above.
         before_send=before_send,
         before_send_transaction=before_send_transaction,
