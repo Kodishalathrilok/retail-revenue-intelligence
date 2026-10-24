@@ -241,6 +241,32 @@ with synthetic secrets.
 The API deliberately has no endpoint that raises a test error, because a
 public route that produces errors on demand is an abuse vector.
 
+**Merging does not activate the API side.** The Vercel function does not run
+the repository's `src/`; it runs `frontend/api/index.py`, which imports
+`rrip.api.main` from the package that `frontend/api/requirements.txt` installs,
+and that is pinned to one commit (`rrip @ git+…@<sha>`). Until the pin moves,
+production runs the pinned commit's code, with `sentry-sdk` installed and never
+imported. The Next.js frontend, Speed Insights included, is built from the
+merged repository and changes on the next deploy.
+
+A commit cannot pin itself, since its SHA depends on its contents, so the pin
+always moves in a separate, later commit:
+
+1. Merge the source change into `main`, after anything it depends on (it is
+   built on `release-hardening`).
+2. Take the commit as it exists on `origin/main`, meaning the merge or squash
+   commit. Do not use a feature-branch SHA: a squash merge leaves branch
+   commits off `main`, and once the branch is deleted GitHub need not keep them.
+   Check it with `git merge-base --is-ancestor <sha> origin/main`, and confirm
+   `git cat-file -e <sha>:src/rrip/api/observability.py` succeeds.
+3. In a new commit, set the pin to that full 40-character SHA (the
+   `test_function_requirements.py` tests require the full SHA). Merge it once CI
+   is green.
+4. In that deployment's Vercel build log, check that pip installed `rrip` at
+   the new SHA. The API does not report its own version, so the build log is
+   the evidence.
+5. Only then set `SENTRY_DSN` and run the check event above.
+
 **Vercel Speed Insights (real-user Core Web Vitals).** `<SpeedInsights />` is
 mounted in `frontend/app/layout.tsx`. Enable Speed Insights in the Vercel
 dashboard (Project -> Speed Insights), then deploy. Data appears only after

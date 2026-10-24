@@ -66,11 +66,13 @@ def _ai_unavailable(departments: list[str]) -> JSONResponse:
 
 
 def _public_reason(reason: str | None) -> str | None:
-    """Provider failures are logged in full and reported generically.
+    """Provider failures are logged and reported generically.
 
-    The raw text is an upstream error body, useful in a log and meaningless (or
-    revealing about the stack) in a response. Every other failure reason --
-    gate rejections, refusals -- is the product and is returned as is.
+    The logged reason is the provider exception's message, which carries the
+    provider, model, HTTP status and error code -- never the upstream body
+    (rrip.ai.provider._upstream_error), because a log line here becomes a
+    Sentry breadcrumb. Every other failure reason -- gate rejections, refusals
+    -- is the product and is returned as is.
     """
     if reason and reason.startswith("provider error"):
         logger.warning("NL->SQL %s", reason)
@@ -118,7 +120,7 @@ async def nl_query(req: NLQueryRequest, provider: str | None = None) -> NLQueryR
         logger.warning("NL->SQL exceeded the %ss deadline", MODEL_DEADLINE_SECONDS)
         raise HTTPException(503, _PROVIDER_DOWN) from None
     except LLMUnavailable as exc:
-        logger.warning("NL->SQL provider unavailable: %s", exc)
+        logger.warning("NL->SQL provider unavailable: %s: %s", type(exc).__name__, exc)
         raise HTTPException(503, _PROVIDER_DOWN) from exc
 
     return NLQueryResponse(
@@ -243,7 +245,7 @@ async def ask(req: AskRequest, provider: str | None = None) -> dict:
         except LLMError as exc:
             # The whole fallback chain failed (Gemini already falls through
             # its models on 404/429/503 inside the call).
-            logger.warning("/ask provider unavailable: %s", exc)
+            logger.warning("/ask provider unavailable: %s: %s", type(exc).__name__, exc)
             return _ai_unavailable(departments)
 
     if not intent.is_complete:

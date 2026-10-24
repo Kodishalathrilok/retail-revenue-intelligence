@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import json
 import random
+import re
 import tempfile
 import time
 from abc import ABC, abstractmethod
@@ -200,7 +201,8 @@ class LLMProvider(ABC):
                 if attempt == retries:
                     break
                 await asyncio.sleep(min(2 ** attempt, 20))
-        raise LLMError(f"{self.name} failed after {retries} attempts: {last_exc}")
+        raise LLMError(f"{self.name} failed after {retries} attempts: "
+                       f"{type(last_exc).__name__}: {last_exc}")
 
 
 class LLMError(RuntimeError):
@@ -290,7 +292,7 @@ class GeminiProvider(LLMProvider):
         # verbatim into logs and tracebacks on every failure.
         headers = {"x-goog-api-key": self.api_key or ""}
 
-        last_status, last_detail = None, ""
+        last = ""
         async with httpx.AsyncClient(timeout=60) as client:
             for i, model in enumerate(self.MODELS):
                 url = f"{self.endpoint}/{model}:generateContent"
@@ -301,20 +303,19 @@ class GeminiProvider(LLMProvider):
                 # the same overloaded model four times while a working one sits
                 # next in the chain turned a demand spike into a failed answer.
                 if r.status_code in (404, 429, 503):
-                    last_status, last_detail = r.status_code, r.text[:200]
+                    last = _upstream_error(r)
                     if i < len(self.MODELS) - 1:
                         continue  # this model is unavailable; try the next
                     raise RateLimited(
-                        f"gemini: every model in the fallback chain returned "
-                        f"{last_status}. Last: {last_detail}", _retry_after(r))
+                        f"gemini: every model in the fallback chain was "
+                        f"unavailable (last: {last})", _retry_after(r))
 
                 if r.status_code >= 400:
                     # Raise our own error rather than httpx's, which embeds the
                     # request URL and any credentials it carries. A 4xx here is
                     # the request itself (bad key, bad body) -- not transient --
                     # so it is non-retryable and ends the call at once.
-                    raise NonRetryable(
-                        f"gemini {model} returned {r.status_code}: {r.text[:300]}")
+                    raise NonRetryable(f"gemini {model} returned {_upstream_error(r)}")
                 data = r.json()
                 # Record which model actually answered, so logs and responses
                 # report the truth rather than the preference.
@@ -334,10 +335,12 @@ class GeminiProvider(LLMProvider):
                 try:
                     return cand["content"]["parts"][0]["text"]
                 except (KeyError, IndexError) as exc:
-                    raise LLMError(
-                        f"unexpected gemini response shape: {str(data)[:300]}") from exc
+                    # What was missing, not what arrived: `data` is the model's
+                    # output, i.e. possibly the generated SQL itself.
+                    raise LLMError("unexpected gemini response shape: no "
+                                   "candidates[0].content.parts[0].text") from exc
 
-        raise LLMError(f"gemini exhausted all models ({last_status}): {last_detail}")
+        raise LLMError(f"gemini exhausted all models (last: {last})")
 
 
 class GroqProvider(LLMProvider):
@@ -357,7 +360,7 @@ class GroqProvider(LLMProvider):
         if r.status_code == 429:
             raise RateLimited("groq 429", _retry_after(r))
         if 400 <= r.status_code < 500:
-            raise NonRetryable(f"groq returned {r.status_code}: {r.text[:300]}")
+            raise NonRetryable(f"groq returned {_upstream_error(r)}")
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
 
@@ -395,6 +398,31 @@ def _retry_after(r: httpx.Response) -> float | None:
         return float(v) if v else None
     except ValueError:
         return None
+
+
+# A provider's error code, e.g. Gemini's "RESOURCE_EXHAUSTED" or Groq's
+# "invalid_request_error": a bare token, never prose.
+_ERROR_CODE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
+
+
+def _upstream_error(r: httpx.Response) -> str:
+    """'400 INVALID_ARGUMENT' -- the status and the provider's error code only.
+
+    Never the response body. These messages become log lines, Sentry
+    breadcrumbs and chained exceptions, and an error body is provider-controlled
+    text that can echo the request -- the prompt, the schema, generated SQL.
+    Status plus code is enough to tell a bad key from a quota from an outage.
+    """
+    try:
+        err = r.json().get("error")
+    except (ValueError, AttributeError):
+        err = None
+    if isinstance(err, dict):
+        for key in ("status", "code", "type"):
+            v = err.get(key)
+            if isinstance(v, str) and _ERROR_CODE_RE.fullmatch(v):
+                return f"{r.status_code} {v}"
+    return str(r.status_code)
 
 
 def get_provider(name: str | None = None, use_cache: bool = True) -> LLMProvider:

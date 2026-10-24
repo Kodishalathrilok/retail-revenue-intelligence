@@ -206,6 +206,10 @@ def init_sentry() -> bool:
         # outbound HTTP call -- i.e. to Gemini and Groq. Nothing downstream is
         # ours, so propagate to no one.
         trace_propagation_targets=[],
+        # Release-health sessions (crash-free rate per release) are on by
+        # default. Nothing here uses them, and a serverless function's "session"
+        # is one request anyway. Off until there is a release dashboard to feed.
+        auto_session_tracking=False,
         # The boundary: nothing leaves without passing the scrubbers above.
         before_send=before_send,
         before_send_transaction=before_send_transaction,
