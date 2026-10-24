@@ -29,6 +29,7 @@ import { Fragment } from 'react';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { Newsreader, Libre_Franklin, JetBrains_Mono } from 'next/font/google';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { MastheadNav } from '@/components/MastheadNav';
 
 /* `style: ['normal']` is deliberate on the display face: the italic is never
@@ -163,6 +164,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </p>
           </div>
         </footer>
+
+        {/* Real-user Core Web Vitals. Inert until Speed Insights is enabled in
+            the Vercel project and the site is deployed; it adds no UI and does
+            not block server rendering. */}
+        <SpeedInsights />
       </body>
     </html>
   );

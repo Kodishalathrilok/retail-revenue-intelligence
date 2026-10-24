@@ -215,6 +215,39 @@ does not forward external IPs, to prevent spoofing, and that
 a proxy placed in front of Vercel. That was then verified on the deployment, not
 assumed -- see below.
 
+### Monitoring (optional, off until configured)
+
+Both integrations are in the code and do nothing until switched on. Neither
+has been verified against live data yet.
+
+**Sentry (API errors).** `src/rrip/api/observability.py` initialises the SDK
+only when `SENTRY_DSN` is set, with request bodies, local variables, PII and
+outbound trace headers off, and every event, transaction and breadcrumb run
+through a scrubber first. `tests/test_observability.py` checks that scrubber
+with synthetic secrets.
+
+1. Create a Sentry project (platform: Python / FastAPI) and copy its DSN.
+2. In the Vercel project environment (never committed): `SENTRY_DSN`, and
+   optionally `SENTRY_ENVIRONMENT` (defaults to `RRIP_TIER`) and
+   `RRIP_SENTRY_TRACES_SAMPLE_RATE` (defaults to `0.0`, which means errors only).
+3. Before relying on it, send one harmless event from a local shell with the
+   DSN in `.env` and `SENTRY_ENVIRONMENT=dev`, then open it in Sentry and check
+   that it carries no headers, body or query string you would not publish:
+
+   ```bash
+   python -c "from rrip.api.observability import init_sentry; import sentry_sdk; assert init_sentry(); sentry_sdk.capture_message('rrip monitoring check'); sentry_sdk.flush()"
+   ```
+
+The API deliberately has no endpoint that raises a test error, because a
+public route that produces errors on demand is an abuse vector.
+
+**Vercel Speed Insights (real-user Core Web Vitals).** `<SpeedInsights />` is
+mounted in `frontend/app/layout.tsx`. Enable Speed Insights in the Vercel
+dashboard (Project -> Speed Insights), then deploy. Data appears only after
+real visits to the deployed site. The script and beacon are served same-origin
+under `/_vercel/speed-insights/`, so the CSP in `next.config.js` does not block
+them.
+
 ## Verified deployment (2026-09-30)
 
 ```

@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from rrip.ai.provider import CallRefused
 from rrip.api import ai_routes, analytics, causal_routes, forecast_routes
 from rrip.api.db import close_pool, open_pool
+from rrip.api.observability import init_sentry
 from rrip.config import settings
 
 # psycopg's async driver does not work with the ProactorEventLoop that Python
@@ -20,6 +21,10 @@ from rrip.config import settings
 # out. The selector policy must be set before any loop is created.
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+# Error monitoring, before the app is built so Sentry's FastAPI integration
+# patches the request path. A no-op when SENTRY_DSN is unset (local, CI, tests).
+init_sentry()
 
 
 @asynccontextmanager
