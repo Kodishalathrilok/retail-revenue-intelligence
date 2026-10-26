@@ -9,6 +9,8 @@ department" by something more reliable than matching on prose.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -24,6 +26,8 @@ def client():
     try:
         FS.load_store(R.MODEL_DIR, force=True)
     except FS.ForecastUnavailable as exc:
+        if os.getenv("RRIP_REQUIRE_FORECAST_ARTIFACT"):
+            raise
         pytest.skip(f"no trained forecast artifact: {exc}")
 
     app = FastAPI()
@@ -136,6 +140,8 @@ def ai_client():
     try:
         FS.load_store(R.MODEL_DIR, force=True)
     except FS.ForecastUnavailable as exc:
+        if os.getenv("RRIP_REQUIRE_FORECAST_ARTIFACT"):
+            raise
         pytest.skip(f"no trained forecast artifact: {exc}")
 
     from rrip.api import ai_routes
@@ -181,7 +187,16 @@ def test_ask_refuses_an_unmodelled_metric(ai_client):
     assert body["routing"]["rule"] == "forecast_scope"
 
 
-def test_ask_asks_which_department_rather_than_guessing(ai_client):
+def test_ask_asks_which_department_rather_than_guessing(ai_client, monkeypatch):
+    # No department can be resolved deterministically from "revenue", so /ask
+    # consults the model. Inject a fake provider that returns NONE, so the test
+    # exercises the "no department identified" path with no API key or network:
+    # in CI there is no key, and the real provider would return AI_UNAVAILABLE
+    # (a different, key-dependent response) instead of this governance refusal.
+    from rrip.ai.provider import FakeProvider
+    from rrip.api import limits
+    monkeypatch.setattr(limits, "get_provider",
+                        lambda name=None, use_cache=True: FakeProvider(["NONE"]))
     r = ai_client.post("/api/v1/ai/ask",
                        json={"question": "Forecast next week's revenue."})
     body = r.json()
@@ -201,7 +216,10 @@ def test_ask_surfaces_a_governance_refusal_intact(ai_client):
 
 
 def test_ask_requires_a_question(ai_client):
-    assert ai_client.post("/api/v1/ai/ask", json={}).status_code == 400
+    # A missing/blank question is now a request-validation error (the body is a
+    # bounded model, 3..500 chars) rather than a hand-rolled 400.
+    assert ai_client.post("/api/v1/ai/ask", json={}).status_code == 422
+    assert ai_client.post("/api/v1/ai/ask", json={"question": ""}).status_code == 422
 
 
 # --- the serverless constraint ----------------------------------------------

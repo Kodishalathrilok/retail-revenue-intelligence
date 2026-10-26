@@ -95,10 +95,15 @@ class LLMProvider(ABC):
     model: str = ""
 
     def __init__(self, api_key: str | None = None, rpm: int = 12,
-                 use_cache: bool = True) -> None:
+                 use_cache: bool = True, max_retries: int = 4) -> None:
         self.api_key = api_key
         self.limiter = RateLimiter(requests_per_minute=rpm)
         self.use_cache = use_cache
+        # How many provider attempts complete() makes. An attribute so a caller
+        # with a time budget can lower it: the API sets 2 (guarded_provider),
+        # because a request runs inside a 60 s serverless function and four
+        # attempts with backoff do not fit. The CLI and benchmarks keep 4.
+        self.max_retries = max_retries
         # Awaited before every paid attempt (not for cache hits). The API sets
         # it to the shared daily-cap counter in rrip.api.limits; it raises a
         # CallRefused to stop the call. None everywhere else -- the CLI and the
@@ -109,23 +114,27 @@ class LLMProvider(ABC):
     def available(self) -> bool:
         return bool(self.api_key)
 
-    def _cache_path(self, prompt: str, system: str) -> Path:
+    def _cache_path(self, prompt: str, system: str, model: str) -> Path:
+        # Keyed on the model PASSED, not self.model: GeminiProvider rewrites
+        # self.model to whichever fallback answered, so a key read from
+        # self.model would be the preferred model on the read and the fallback
+        # on the write -- a cache that never hit after a single fallback.
         key = hashlib.sha256(
-            f"{self.name}|{self.model}|{system}|{prompt}".encode()).hexdigest()[:24]
+            f"{self.name}|{model}|{system}|{prompt}".encode()).hexdigest()[:24]
         return CACHE_DIR / f"{self.name}-{key}.json"
 
-    def _read_cache(self, prompt: str, system: str) -> str | None:
+    def _read_cache(self, prompt: str, system: str, model: str) -> str | None:
         if not self.use_cache:
             return None
         try:
-            p = self._cache_path(prompt, system)
+            p = self._cache_path(prompt, system, model)
             if p.exists():
                 return json.loads(p.read_text(encoding="utf-8"))["text"]
         except (OSError, ValueError, KeyError):
             return None
         return None
 
-    def _write_cache(self, prompt: str, system: str, text: str) -> None:
+    def _write_cache(self, prompt: str, system: str, model: str, text: str) -> None:
         """Best effort. A cache is an optimisation, never a failure path.
 
         This previously let an OSError escape, so a read-only filesystem turned
@@ -135,7 +144,7 @@ class LLMProvider(ABC):
             return
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            self._cache_path(prompt, system).write_text(
+            self._cache_path(prompt, system, model).write_text(
                 json.dumps({"text": text, "prompt": prompt[:500]}), encoding="utf-8")
         except OSError:
             pass
@@ -144,18 +153,21 @@ class LLMProvider(ABC):
     async def _call(self, prompt: str, system: str, temperature: float) -> str: ...
 
     async def complete(self, prompt: str, system: str = "",
-                       temperature: float = 0.0, max_retries: int = 4) -> LLMResponse:
-        cached = self._read_cache(prompt, system)
+                       temperature: float = 0.0,
+                       max_retries: int | None = None) -> LLMResponse:
+        model = self.model          # stable for the cache; _call may rewrite self.model
+        cached = self._read_cache(prompt, system, model)
         if cached is not None:
-            return LLMResponse(cached, self.name, self.model, cached=True)
+            return LLMResponse(cached, self.name, model, cached=True)
 
         if not self.available:
             raise LLMUnavailable(
                 f"{self.name} has no API key configured. Set the provider's key "
                 "in .env, or use FakeProvider for offline development.")
 
+        retries = self.max_retries if max_retries is None else max_retries
         last_exc: Exception | None = None
-        for attempt in range(1, max_retries + 1):
+        for attempt in range(1, retries + 1):
             await self.limiter.acquire()
             # Outside the try below on purpose: that block retries on any
             # exception, and a refused budget must end the call, not be retried.
@@ -164,24 +176,31 @@ class LLMProvider(ABC):
             t0 = time.perf_counter()
             try:
                 text = await self._call(prompt, system, temperature)
-                self._write_cache(prompt, system, text)
+                self._write_cache(prompt, system, model, text)
                 return LLMResponse(text, self.name, self.model,
                                    duration_ms=(time.perf_counter() - t0) * 1000,
                                    attempts=attempt)
+            except (CallRefused, NonRetryable):
+                # A budget refusal, a 4xx, or a truncated response: retrying
+                # cannot change the outcome and only burns the time budget and
+                # (for the cap) another charged attempt. End the call now.
+                raise
             except RateLimited as exc:
                 last_exc = exc
+                if attempt == retries:
+                    break                 # no backoff sleep after the last try
                 # Exponential backoff with jitter. Jitter matters: without it,
                 # concurrent callers retry in lockstep and re-trigger the limit.
-                delay = min(2 ** attempt + random.uniform(0, 1), 60)
+                delay = min(2 ** attempt + random.uniform(0, 1), 20)
                 if exc.retry_after:
-                    delay = max(delay, exc.retry_after)
+                    delay = max(delay, min(exc.retry_after, 20))
                 await asyncio.sleep(delay)
             except Exception as exc:
                 last_exc = exc
-                if attempt == max_retries:
+                if attempt == retries:
                     break
                 await asyncio.sleep(min(2 ** attempt, 20))
-        raise LLMError(f"{self.name} failed after {max_retries} attempts: {last_exc}")
+        raise LLMError(f"{self.name} failed after {retries} attempts: {last_exc}")
 
 
 class LLMError(RuntimeError):
@@ -214,6 +233,13 @@ class RateLimited(LLMError):
     def __init__(self, msg: str, retry_after: float | None = None) -> None:
         super().__init__(msg)
         self.retry_after = retry_after
+
+
+class NonRetryable(LLMError):
+    """A failure that a retry cannot fix: a 4xx other than 429 (a bad request,
+    an auth or quota error), or a response the model truncated. complete() ends
+    the call on this rather than spending its remaining attempts and, under the
+    API cap, charging for each one."""
 
 
 class GeminiProvider(LLMProvider):
@@ -284,8 +310,10 @@ class GeminiProvider(LLMProvider):
 
                 if r.status_code >= 400:
                     # Raise our own error rather than httpx's, which embeds the
-                    # request URL and any credentials it carries.
-                    raise LLMError(
+                    # request URL and any credentials it carries. A 4xx here is
+                    # the request itself (bad key, bad body) -- not transient --
+                    # so it is non-retryable and ends the call at once.
+                    raise NonRetryable(
                         f"gemini {model} returned {r.status_code}: {r.text[:300]}")
                 data = r.json()
                 # Record which model actually answered, so logs and responses
@@ -298,7 +326,8 @@ class GeminiProvider(LLMProvider):
                     # Report truncation as truncation. A MAX_TOKENS cut lands
                     # mid-JSON and would otherwise be reported by the caller as
                     # a parse error, sending the reader after the wrong bug.
-                    raise LLMError(
+                    # Non-retryable: the same prompt truncates the same way.
+                    raise NonRetryable(
                         f"gemini stopped early (finishReason={finish}); the "
                         "response is incomplete. Raise maxOutputTokens or "
                         "shorten the input.")
@@ -327,6 +356,8 @@ class GroqProvider(LLMProvider):
                       "temperature": temperature, "max_tokens": 2048})
         if r.status_code == 429:
             raise RateLimited("groq 429", _retry_after(r))
+        if 400 <= r.status_code < 500:
+            raise NonRetryable(f"groq returned {r.status_code}: {r.text[:300]}")
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
 

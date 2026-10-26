@@ -13,6 +13,7 @@ workflow.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -34,7 +35,19 @@ def test_frontend_logic_node_tests_pass(path: Path) -> None:
         if os.getenv("CI"):
             pytest.fail("node is not on PATH in CI; the frontend logic tests would not run")
         pytest.skip("node not installed")
-    run = subprocess.run([node, "--test", str(path)], capture_output=True, text=True,
-                         timeout=120)
-    assert run.returncode == 0, run.stdout[-3000:] + run.stderr[-2000:]
-    assert "# fail 0" in run.stdout
+    # Force the TAP reporter so the summary format is identical on every Node
+    # version. The default reporter changed between Node releases -- a newer
+    # runner prints "ℹ fail 0" where older ones printed "# fail 0" -- which
+    # broke a bare "# fail 0" check in CI even though the tests passed. TAP is a
+    # stable built-in reporter (Node 20+) and always prints "# pass N"/"# fail N".
+    run = subprocess.run([node, "--test", "--test-reporter=tap", str(path)],
+                         capture_output=True, text=True, timeout=120)
+    diagnostic = run.stdout[-3000:] + run.stderr[-2000:]
+    # Three independent guarantees, none of which tolerates a failed test:
+    #   1. the process exited 0 -- node --test returns non-zero on any failure,
+    assert run.returncode == 0, diagnostic
+    #   2. at least one test actually ran (not a vacuous pass on zero tests),
+    passed = re.search(r"^# pass (\d+)$", run.stdout, re.MULTILINE)
+    assert passed and int(passed.group(1)) > 0, diagnostic
+    #   3. and the failure count is exactly zero.
+    assert re.search(r"^# fail 0$", run.stdout, re.MULTILINE), diagnostic

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from rrip.ai.narration import narrate
@@ -13,7 +13,7 @@ from rrip.ai.nl2sql import answer
 from rrip.ai.provider import CallRefused, LLMError, LLMUnavailable, get_provider
 from rrip.api import limits
 from rrip.api.db import fetch
-from rrip.api.models import NarrateRequest, NLQueryRequest, NLQueryResponse
+from rrip.api.models import AskRequest, NarrateRequest, NLQueryRequest, NLQueryResponse
 from rrip.config import settings
 
 logger = logging.getLogger(__name__)
@@ -27,8 +27,22 @@ PROTECTED = [Depends(limits.protect)]
 
 _PROVIDER_DOWN = "The language model provider is unavailable. Try again shortly."
 
+# A whole model-backed request must finish inside this, comfortably under the
+# 60 s serverless function limit. It bounds the worst case -- a hung provider,
+# or retries plus DB work -- so the platform returns a clean 503 rather than a
+# 504 with no body. The provider's own attempt count (2, set by
+# guarded_provider) keeps the common case well under it.
+MODEL_DEADLINE_SECONDS = 45
+
 
 def _provider(name: str | None = None):
+    # A client cannot choose the provider on a public deployment: ?provider=fake
+    # answers instantly and, before this, was retried and charged against the
+    # daily cap on each failure -- a way to drain the budget without reaching a
+    # real model. The configured provider is the only one there.
+    if name is not None and settings.is_published:
+        raise HTTPException(400, "the model provider cannot be selected on this "
+                                 "deployment")
     return limits.guarded_provider(name)
 
 
@@ -73,7 +87,10 @@ async def status() -> dict:
         out.append({"provider": n, "model": p.model, "configured": p.available,
                     "requests_per_minute": p.limiter.requests_per_minute})
     return {"providers": out,
-            "active": os.getenv("RRIP_LLM_PROVIDER", "gemini"),
+            # From settings, not os.getenv: pydantic-settings loads .env into
+            # the Settings object, not the process environment, so os.getenv
+            # would miss a provider set only in .env and always report "gemini".
+            "active": settings.llm_provider,
             "cache_enabled": settings.llm_cache,
             # on / off / misconfigured -- so a deployment smoke test can assert
             # the AI endpoints are protected without triggering a model call.
@@ -94,7 +111,12 @@ async def nl_query(req: NLQueryRequest, provider: str | None = None) -> NLQueryR
         raise HTTPException(400, str(exc)) from exc
 
     try:
-        result = await answer(req.question, p, max_attempts=req.max_attempts)
+        result = await asyncio.wait_for(
+            answer(req.question, p, max_attempts=req.max_attempts),
+            timeout=MODEL_DEADLINE_SECONDS)
+    except TimeoutError:
+        logger.warning("NL->SQL exceeded the %ss deadline", MODEL_DEADLINE_SECONDS)
+        raise HTTPException(503, _PROVIDER_DOWN) from None
     except LLMUnavailable as exc:
         logger.warning("NL->SQL provider unavailable: %s", exc)
         raise HTTPException(503, _PROVIDER_DOWN) from exc
@@ -135,7 +157,12 @@ async def narrate_endpoint(req: NarrateRequest, provider: str | None = None) -> 
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    result = await narrate(req.data, req.question, p)
+    try:
+        result = await asyncio.wait_for(
+            narrate(req.data, req.question, p), timeout=MODEL_DEADLINE_SECONDS)
+    except TimeoutError:
+        logger.warning("narrate exceeded the %ss deadline", MODEL_DEADLINE_SECONDS)
+        raise HTTPException(503, _PROVIDER_DOWN) from None
     return {
         "ok": result.ok,
         "narrative": result.narrative if result.ok else None,
@@ -150,7 +177,7 @@ async def narrate_endpoint(req: NarrateRequest, provider: str | None = None) -> 
 
 
 @router.post("/ask", dependencies=PROTECTED)
-async def ask(payload: dict, provider: str | None = None) -> dict:
+async def ask(req: AskRequest, provider: str | None = None) -> dict:
     """Route a question to SQL analytics or to the forecasting model.
 
     The descriptive/predictive split, made structural. The router classifies
@@ -171,10 +198,7 @@ async def ask(payload: dict, provider: str | None = None) -> dict:
     from rrip.ai.router import FORECAST, classify
     from rrip.forecast import service as FS
 
-    question = (payload.get("question") or "").strip()
-    if not question:
-        raise HTTPException(400, "payload must include 'question'")
-
+    question = req.question.strip()
     routing = classify(question)
     if routing.verdict != FORECAST:
         return {"question": question, "route": "sql",
@@ -208,9 +232,14 @@ async def ask(payload: dict, provider: str | None = None) -> dict:
         if not p.available:
             return _ai_unavailable(departments)
         try:
-            intent = await FI.resolve_with_llm(question, departments, p)
+            intent = await asyncio.wait_for(
+                FI.resolve_with_llm(question, departments, p),
+                timeout=MODEL_DEADLINE_SECONDS)
         except CallRefused:
             raise                   # rate limit or daily cap: say so
+        except TimeoutError:
+            logger.warning("/ask exceeded the %ss deadline", MODEL_DEADLINE_SECONDS)
+            return _ai_unavailable(departments)
         except LLMError as exc:
             # The whole fallback chain failed (Gemini already falls through
             # its models on 404/429/503 inside the call).
@@ -263,7 +292,7 @@ async def ask(payload: dict, provider: str | None = None) -> dict:
 
 
 @router.get("/anomalies")
-async def anomalies(z_threshold: float = 2.5) -> dict:
+async def anomalies(z_threshold: float = Query(2.5, ge=0.0, le=20.0)) -> dict:
     """Anomalies computed in SQL, ready to be narrated.
 
     The model does not detect these and does not score them. It receives the

@@ -84,6 +84,22 @@ GRANT USAGE ON SCHEMA public TO rrip_ro;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE CREATE ON SCHEMA public FROM rrip_ro;
 
+-- No temporary tables. `SELECT ... INTO TEMP t` and `CREATE TEMP TABLE t` make
+-- a session-local table, and the API pool reuses a connection across requests
+-- -- so a temp table named like a published one shadows it for every later
+-- request on that connection, changing what other visitors are shown with no
+-- write privilege on any base table. The SQL gates reject the statement
+-- (the `into` keyword, and `create`); this removes the capability under them.
+-- TEMPORARY is granted to PUBLIC by default, so it is revoked from PUBLIC, not
+-- only from the role; the database owner keeps it by ownership. Verified by the
+-- create_temp_table probe in src/rrip/eval/verify_role.py.
+DO $$
+BEGIN
+    EXECUTE format('REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC', current_database());
+    EXECUTE format('REVOKE TEMPORARY ON DATABASE %I FROM rrip_ro', current_database());
+END
+$$;
+
 -- SELECT on what exists now...
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO rrip_ro;
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO rrip_ro;
