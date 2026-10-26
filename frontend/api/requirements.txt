@@ -31,4 +31,4 @@ typer==0.27.1
 rich==15.0.0
 sentry-sdk[fastapi]==2.73.0
 
-rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@ce4b443275228104a9c003a7e5e18d2f459564a8
+rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@757e3c455bbfeb9d4c4e3a60ea60be8d43488af6
