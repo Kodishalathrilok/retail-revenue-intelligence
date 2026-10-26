@@ -30,4 +30,4 @@ httpx==0.28.1
 typer==0.27.1
 rich==15.0.0
 
-rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@23c6f6b784c950bf5b0da6339aef603eed4c1a71
+rrip @ git+https://github.com/Kodishalathrilok/retail-revenue-intelligence.git@ce4b443275228104a9c003a7e5e18d2f459564a8
