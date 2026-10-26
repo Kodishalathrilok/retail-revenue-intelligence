@@ -144,6 +144,16 @@ class Settings(BaseSettings):
     # API directly, leave empty so a forged header cannot pick its own bucket.
     trusted_ip_header: str = Field(default="", alias="RRIP_TRUSTED_IP_HEADER")
 
+    # --- Error monitoring (rrip.api.observability). Optional, off by default. ---
+    #
+    # Empty SENTRY_DSN -> monitoring disabled and the app runs unchanged. Tracing
+    # is off (0.0) unless deliberately raised; events are scrubbed before send,
+    # but less captured data is less to scrub. Environment falls back to the tier.
+    sentry_dsn: str = Field(default="", alias="SENTRY_DSN")
+    sentry_traces_sample_rate: float = Field(
+        default=0.0, ge=0.0, le=1.0, alias="RRIP_SENTRY_TRACES_SAMPLE_RATE")
+    sentry_environment: str = Field(default="", alias="SENTRY_ENVIRONMENT")
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

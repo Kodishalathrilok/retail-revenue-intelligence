@@ -215,6 +215,65 @@ does not forward external IPs, to prevent spoofing, and that
 a proxy placed in front of Vercel. That was then verified on the deployment, not
 assumed -- see below.
 
+### Monitoring (optional, off until configured)
+
+Both integrations are in the code and do nothing until switched on. Neither
+has been verified against live data yet.
+
+**Sentry (API errors).** `src/rrip/api/observability.py` initialises the SDK
+only when `SENTRY_DSN` is set, with request bodies, local variables, PII and
+outbound trace headers off, and every event, transaction and breadcrumb run
+through a scrubber first. `tests/test_observability.py` checks that scrubber
+with synthetic secrets.
+
+1. Create a Sentry project (platform: Python / FastAPI) and copy its DSN.
+2. In the Vercel project environment (never committed): `SENTRY_DSN`, and
+   optionally `SENTRY_ENVIRONMENT` (defaults to `RRIP_TIER`) and
+   `RRIP_SENTRY_TRACES_SAMPLE_RATE` (defaults to `0.0`, which means errors only).
+3. Before relying on it, send one harmless event from a local shell with the
+   DSN in `.env` and `SENTRY_ENVIRONMENT=dev`, then open it in Sentry and check
+   that it carries no headers, body or query string you would not publish:
+
+   ```bash
+   python -c "from rrip.api.observability import init_sentry; import sentry_sdk; assert init_sentry(); sentry_sdk.capture_message('rrip monitoring check'); sentry_sdk.flush()"
+   ```
+
+The API deliberately has no endpoint that raises a test error, because a
+public route that produces errors on demand is an abuse vector.
+
+**Merging does not activate the API side.** The Vercel function does not run
+the repository's `src/`; it runs `frontend/api/index.py`, which imports
+`rrip.api.main` from the package that `frontend/api/requirements.txt` installs,
+and that is pinned to one commit (`rrip @ git+…@<sha>`). Until the pin moves,
+production runs the pinned commit's code, with `sentry-sdk` installed and never
+imported. The Next.js frontend, Speed Insights included, is built from the
+merged repository and changes on the next deploy.
+
+A commit cannot pin itself, since its SHA depends on its contents, so the pin
+always moves in a separate, later commit:
+
+1. Merge the source change into `main`, after anything it depends on (it is
+   built on `release-hardening`).
+2. Take the commit as it exists on `origin/main`, meaning the merge or squash
+   commit. Do not use a feature-branch SHA: a squash merge leaves branch
+   commits off `main`, and once the branch is deleted GitHub need not keep them.
+   Check it with `git merge-base --is-ancestor <sha> origin/main`, and confirm
+   `git cat-file -e <sha>:src/rrip/api/observability.py` succeeds.
+3. In a new commit, set the pin to that full 40-character SHA (the
+   `test_function_requirements.py` tests require the full SHA). Merge it once CI
+   is green.
+4. In that deployment's Vercel build log, check that pip installed `rrip` at
+   the new SHA. The API does not report its own version, so the build log is
+   the evidence.
+5. Only then set `SENTRY_DSN` and run the check event above.
+
+**Vercel Speed Insights (real-user Core Web Vitals).** `<SpeedInsights />` is
+mounted in `frontend/app/layout.tsx`. Enable Speed Insights in the Vercel
+dashboard (Project -> Speed Insights), then deploy. Data appears only after
+real visits to the deployed site. The script and beacon are served same-origin
+under `/_vercel/speed-insights/`, so the CSP in `next.config.js` does not block
+them.
+
 ## Verified deployment (2026-09-30)
 
 ```

@@ -21,6 +21,10 @@ dependencies = [
     "httpx>=0.27",
     "typer>=0.12",
     "rich>=13.7",
+    # Optional error monitoring (rrip.api.observability). Small, and inert when
+    # SENTRY_DSN is unset, but it instruments the deployed function so it is a
+    # core (serving) dependency, not a pipeline one.
+    "sentry-sdk[fastapi]>=2.0",
 ]
 
 [project.optional-dependencies]
